@@ -93,6 +93,46 @@ static bool load_wav_file(const std::string& path, std::vector<float>& samples,
 // Usage
 // ============================================================================
 
+// ============================================================================
+// JSON output helpers for --json-stream mode
+// ============================================================================
+
+static void print_segments_json(const std::vector<DiarizationResult::Segment>& segments) {
+    printf("[");
+    for (size_t i = 0; i < segments.size(); i++) {
+        const auto& seg = segments[i];
+        printf("{\"start\":%.3f,\"duration\":%.3f,\"speaker\":\"%s\"}",
+               seg.start, seg.duration, seg.speaker.c_str());
+        if (i < segments.size() - 1) printf(",");
+    }
+    printf("]");
+}
+
+static void print_json_push(int chunk, double time, const std::vector<DiarizationResult::Segment>& segments) {
+    printf("{\"type\":\"push\",\"chunk\":%d,\"time\":%.1f,\"segments\":", chunk, time);
+    print_segments_json(segments);
+    printf("}\n");
+    fflush(stdout);
+}
+
+static void print_json_recluster(int chunk, double time, const std::vector<DiarizationResult::Segment>& segments) {
+    printf("{\"type\":\"recluster\",\"chunk\":%d,\"time\":%.1f,\"segments\":", chunk, time);
+    print_segments_json(segments);
+    printf("}\n");
+    fflush(stdout);
+}
+
+static void print_json_finalize(const std::vector<DiarizationResult::Segment>& segments) {
+    printf("{\"type\":\"finalize\",\"segments\":");
+    print_segments_json(segments);
+    printf("}\n");
+    fflush(stdout);
+}
+
+// ============================================================================
+// Usage
+// ============================================================================
+
 static void print_usage(const char* program) {
     fprintf(stderr, "Usage: %s [options] [audio.wav]\n", program);
     fprintf(stderr, "\n");
@@ -103,6 +143,7 @@ static void print_usage(const char* program) {
     fprintf(stderr, "  --provisional-only    Test first 30s only (no full recluster)\n");
     fprintf(stderr, "  --recluster-test      Test recluster behavior\n");
     fprintf(stderr, "  --benchmark           Measure push latency\n");
+    fprintf(stderr, "  --json-stream         Output JSON events to stdout (for streaming viewer)\n");
     fprintf(stderr, "  -o, --output <path>   Output RTTM file\n");
     fprintf(stderr, "  --plda <path>         Path to PLDA binary file\n");
     fprintf(stderr, "  --coreml <path>       Path to CoreML embedding model\n");
@@ -131,6 +172,7 @@ int main(int argc, char** argv) {
     bool provisional_only = false;
     bool recluster_test = false;
     bool benchmark = false;
+    bool json_stream = false;
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -147,6 +189,8 @@ int main(int argc, char** argv) {
             recluster_test = true;
         } else if (arg == "--benchmark") {
             benchmark = true;
+        } else if (arg == "--json-stream") {
+            json_stream = true;
         } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
             output_path = argv[++i];
         } else if (arg == "--plda" && i + 1 < argc) {
@@ -242,17 +286,24 @@ int main(int argc, char** argv) {
         
         last_segments = segments;
         
-        if (benchmark) {
+        double current_time = static_cast<double>(chunks_pushed);
+        bool is_recluster_point = (chunks_pushed % 60 == 0) && chunks_pushed > 0;
+        
+        if (json_stream) {
+            if (is_recluster_point) {
+                print_json_recluster(chunks_pushed, current_time, segments);
+            } else {
+                print_json_push(chunks_pushed, current_time, segments);
+            }
+        } else if (benchmark) {
             fprintf(stderr, "Push %d: %d samples, %.1f ms, %zu segments\n",
                     chunks_pushed, chunk_size, push_ms, segments.size());
         }
         
-        // For provisional-only mode, stop at 30s
         if (provisional_only && chunks_pushed >= 30) {
             break;
         }
         
-        // For recluster test, force recluster at 60s
         if (recluster_test && chunks_pushed == 60) {
             fprintf(stderr, "Forcing recluster at 60s...\n");
             streaming_recluster(state);
@@ -260,21 +311,26 @@ int main(int argc, char** argv) {
     }
     
     double avg_push_ms = total_push_time_ms / chunks_pushed;
-    fprintf(stderr, "\nPushed %d chunks, avg push time: %.1f ms\n", chunks_pushed, avg_push_ms);
-    fprintf(stderr, "Provisional segments: %zu\n", last_segments.size());
+    if (!json_stream) {
+        fprintf(stderr, "\nPushed %d chunks, avg push time: %.1f ms\n", chunks_pushed, avg_push_ms);
+        fprintf(stderr, "Provisional segments: %zu\n", last_segments.size());
+    }
     
-    // ========================================================================
-    // Finalize (unless push-only or provisional-only)
-    // ========================================================================
     if (!push_only && !provisional_only) {
-        fprintf(stderr, "\nFinalizing...\n");
+        if (!json_stream) {
+            fprintf(stderr, "\nFinalizing...\n");
+        }
         auto t_start = std::chrono::high_resolution_clock::now();
         DiarizationResult result = streaming_finalize(state);
         auto t_end = std::chrono::high_resolution_clock::now();
         
-        double finalize_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-        fprintf(stderr, "Finalize time: %.1f ms\n", finalize_ms);
-        fprintf(stderr, "Final segments: %zu\n", result.segments.size());
+        if (json_stream) {
+            print_json_finalize(result.segments);
+        } else {
+            double finalize_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+            fprintf(stderr, "Finalize time: %.1f ms\n", finalize_ms);
+            fprintf(stderr, "Final segments: %zu\n", result.segments.size());
+        }
         
         // Write RTTM if output path specified
         if (!output_path.empty()) {
@@ -302,12 +358,13 @@ int main(int argc, char** argv) {
     
     streaming_free(state);
     
-    if (benchmark) {
-        fprintf(stderr, "\n=== Benchmark Summary ===\n");
-        fprintf(stderr, "Average push latency: %.1f ms\n", avg_push_ms);
-        fprintf(stderr, "Real-time factor: %.1fx\n", 1000.0 / avg_push_ms);
+    if (!json_stream) {
+        if (benchmark) {
+            fprintf(stderr, "\n=== Benchmark Summary ===\n");
+            fprintf(stderr, "Average push latency: %.1f ms\n", avg_push_ms);
+            fprintf(stderr, "Real-time factor: %.1fx\n", 1000.0 / avg_push_ms);
+        }
+        fprintf(stderr, "\nPASSED\n");
     }
-    
-    fprintf(stderr, "\nPASSED\n");
     return 0;
 }
