@@ -1,0 +1,50 @@
+# Build directories
+build/
+cmake-build-*/
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+
+# Executables
+*.exe
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.vim
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
+# Model files (large, download separately)
+*.gguf
+*.mlpackage/
+*.mlmodelc/
+*.bin
+
+# Test outputs
+*.rttm
+*.npy
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# GGML submodule build artifacts
+ggml/build/

@@ -1,0 +1,443 @@
+{
+  "model_type": "PyanNet",
+  "total_parameters": 1473265,
+  "layers": [
+    {
+      "name": "sincnet",
+      "type": "SincNet",
+      "params": {},
+      "num_parameters": 42602
+    },
+    {
+      "name": "sincnet.wav_norm1d",
+      "type": "InstanceNorm1d",
+      "params": {
+        "num_features": 1,
+        "affine": true
+      },
+      "num_parameters": 2
+    },
+    {
+      "name": "sincnet.conv1d",
+      "type": "ModuleList",
+      "params": {},
+      "num_parameters": 42200
+    },
+    {
+      "name": "sincnet.conv1d.0",
+      "type": "Encoder",
+      "params": {},
+      "num_parameters": 80
+    },
+    {
+      "name": "sincnet.conv1d.0.filterbank",
+      "type": "ParamSincFB",
+      "params": {},
+      "num_parameters": 80
+    },
+    {
+      "name": "sincnet.conv1d.1",
+      "type": "Conv1d",
+      "params": {
+        "in_channels": 80,
+        "out_channels": 60,
+        "kernel_size": 5,
+        "stride": 1,
+        "padding": 0,
+        "dilation": 1
+      },
+      "num_parameters": 24060
+    },
+    {
+      "name": "sincnet.conv1d.2",
+      "type": "Conv1d",
+      "params": {
+        "in_channels": 60,
+        "out_channels": 60,
+        "kernel_size": 5,
+        "stride": 1,
+        "padding": 0,
+        "dilation": 1
+      },
+      "num_parameters": 18060
+    },
+    {
+      "name": "sincnet.pool1d",
+      "type": "ModuleList",
+      "params": {},
+      "num_parameters": 0
+    },
+    {
+      "name": "sincnet.pool1d.0",
+      "type": "MaxPool1d",
+      "params": {
+        "kernel_size": 3,
+        "stride": 3,
+        "padding": 0,
+        "dilation": 1
+      },
+      "num_parameters": 0
+    },
+    {
+      "name": "sincnet.pool1d.1",
+      "type": "MaxPool1d",
+      "params": {
+        "kernel_size": 3,
+        "stride": 3,
+        "padding": 0,
+        "dilation": 1
+      },
+      "num_parameters": 0
+    },
+    {
+      "name": "sincnet.pool1d.2",
+      "type": "MaxPool1d",
+      "params": {
+        "kernel_size": 3,
+        "stride": 3,
+        "padding": 0,
+        "dilation": 1
+      },
+      "num_parameters": 0
+    },
+    {
+      "name": "sincnet.norm1d",
+      "type": "ModuleList",
+      "params": {},
+      "num_parameters": 400
+    },
+    {
+      "name": "sincnet.norm1d.0",
+      "type": "InstanceNorm1d",
+      "params": {
+        "num_features": 80,
+        "affine": true
+      },
+      "num_parameters": 160
+    },
+    {
+      "name": "sincnet.norm1d.1",
+      "type": "InstanceNorm1d",
+      "params": {
+        "num_features": 60,
+        "affine": true
+      },
+      "num_parameters": 120
+    },
+    {
+      "name": "sincnet.norm1d.2",
+      "type": "InstanceNorm1d",
+      "params": {
+        "num_features": 60,
+        "affine": true
+      },
+      "num_parameters": 120
+    },
+    {
+      "name": "lstm",
+      "type": "LSTM",
+      "params": {
+        "input_size": 60,
+        "hidden_size": 128,
+        "num_layers": 4,
+        "bidirectional": true,
+        "batch_first": true
+      },
+      "num_parameters": 1380352
+    },
+    {
+      "name": "linear",
+      "type": "ModuleList",
+      "params": {},
+      "num_parameters": 49408
+    },
+    {
+      "name": "linear.0",
+      "type": "Linear",
+      "params": {
+        "in_features": 256,
+        "out_features": 128,
+        "bias": true
+      },
+      "num_parameters": 32896
+    },
+    {
+      "name": "linear.1",
+      "type": "Linear",
+      "params": {
+        "in_features": 128,
+        "out_features": 128,
+        "bias": true
+      },
+      "num_parameters": 16512
+    },
+    {
+      "name": "classifier",
+      "type": "Linear",
+      "params": {
+        "in_features": 128,
+        "out_features": 7,
+        "bias": true
+      },
+      "num_parameters": 903
+    },
+    {
+      "name": "activation",
+      "type": "LogSoftmax",
+      "params": {},
+      "num_parameters": 0
+    }
+  ],
+  "sincnet_filters": {
+    "n_filters": 80,
+    "kernel_size": 251,
+    "stride": 10,
+    "sample_rate": 16000,
+    "min_low_hz": 50,
+    "min_band_hz": 50,
+    "low_hz": [
+      [
+        36.94465255737305
+      ],
+      [
+        78.90959930419922
+      ],
+      [
+        125.86092376708984
+      ],
+      [
+        176.47305297851562
+      ],
+      [
+        230.87364196777344
+      ],
+      [
+        291.1943359375
+      ],
+      [
+        355.4417724609375
+      ],
+      [
+        422.9617004394531
+      ],
+      [
+        490.65716552734375
+      ],
+      [
+        569.5311279296875
+      ],
+      [
+        651.5139770507812
+      ],
+      [
+        735.0159301757812
+      ],
+      [
+        827.2343139648438
+      ],
+      [
+        926.02392578125
+      ],
+      [
+        1030.1741943359375
+      ],
+      [
+        1143.8868408203125
+      ],
+      [
+        1259.6795654296875
+      ],
+      [
+        1381.915771484375
+      ],
+      [
+        1514.11083984375
+      ],
+      [
+        1657.5216064453125
+      ],
+      [
+        1806.41357421875
+      ],
+      [
+        1964.884765625
+      ],
+      [
+        2133.769775390625
+      ],
+      [
+        2313.253662109375
+      ],
+      [
+        2503.81005859375
+      ],
+      [
+        2712.057861328125
+      ],
+      [
+        2926.207763671875
+      ],
+      [
+        3148.514892578125
+      ],
+      [
+        3402.30029296875
+      ],
+      [
+        3660.00537109375
+      ],
+      [
+        3952.558349609375
+      ],
+      [
+        4236.1748046875
+      ],
+      [
+        4542.06005859375
+      ],
+      [
+        4874.23388671875
+      ],
+      [
+        5236.912109375
+      ],
+      [
+        5611.9453125
+      ],
+      [
+        6023.6123046875
+      ],
+      [
+        6446.4453125
+      ],
+      [
+        6935.30126953125
+      ],
+      [
+        7434.2099609375
+      ]
+    ],
+    "band_hz": [
+      [
+        38.60337448120117
+      ],
+      [
+        48.05745315551758
+      ],
+      [
+        53.28559494018555
+      ],
+      [
+        60.93453598022461
+      ],
+      [
+        61.397884368896484
+      ],
+      [
+        63.00627136230469
+      ],
+      [
+        75.02287292480469
+      ],
+      [
+        78.60669708251953
+      ],
+      [
+        76.43205261230469
+      ],
+      [
+        80.77928924560547
+      ],
+      [
+        89.09413146972656
+      ],
+      [
+        97.68508911132812
+      ],
+      [
+        101.93852233886719
+      ],
+      [
+        110.73942565917969
+      ],
+      [
+        119.17658233642578
+      ],
+      [
+        128.05303955078125
+      ],
+      [
+        134.97384643554688
+      ],
+      [
+        143.1213836669922
+      ],
+      [
+        133.50238037109375
+      ],
+      [
+        156.26873779296875
+      ],
+      [
+        164.6552276611328
+      ],
+      [
+        174.63079833984375
+      ],
+      [
+        191.53323364257812
+      ],
+      [
+        193.63104248046875
+      ],
+      [
+        209.79608154296875
+      ],
+      [
+        228.39219665527344
+      ],
+      [
+        233.05157470703125
+      ],
+      [
+        246.753173828125
+      ],
+      [
+        268.3649597167969
+      ],
+      [
+        273.033447265625
+      ],
+      [
+        293.83599853515625
+      ],
+      [
+        307.5343933105469
+      ],
+      [
+        318.40179443359375
+      ],
+      [
+        340.1360168457031
+      ],
+      [
+        360.7013244628906
+      ],
+      [
+        397.1812438964844
+      ],
+      [
+        425.3570861816406
+      ],
+      [
+        460.5928039550781
+      ],
+      [
+        529.3663330078125
+      ],
+      [
+        513.6377563476562
+      ]
+    ]
+  }
+}

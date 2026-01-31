@@ -1,0 +1,6 @@
+[submodule "embedding-ggml/kaldi-native-fbank"]
+	path = embedding-ggml/kaldi-native-fbank
+	url = https://github.com/csukuangfj/kaldi-native-fbank
+[submodule "ggml"]
+	path = ggml
+	url = https://github.com/ggml-org/ggml

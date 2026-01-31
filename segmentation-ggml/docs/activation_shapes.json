@@ -1,0 +1,62 @@
+{
+  "input": [
+    1,
+    1,
+    160000
+  ],
+  "sincnet_conv1": [
+    1,
+    80,
+    15975
+  ],
+  "sincnet_stage1_out": [
+    1,
+    80,
+    5325
+  ],
+  "sincnet_conv2": [
+    1,
+    60,
+    5321
+  ],
+  "sincnet_stage2_out": [
+    1,
+    60,
+    1773
+  ],
+  "sincnet_conv3": [
+    1,
+    60,
+    1769
+  ],
+  "sincnet_stage3_out": [
+    1,
+    60,
+    589
+  ],
+  "lstm_out": [
+    1,
+    589,
+    256
+  ],
+  "linear_0": [
+    1,
+    589,
+    128
+  ],
+  "linear_1": [
+    1,
+    589,
+    128
+  ],
+  "classifier_out": [
+    1,
+    589,
+    7
+  ],
+  "output": [
+    1,
+    589,
+    7
+  ]
+}

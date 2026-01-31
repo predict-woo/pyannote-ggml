@@ -1,0 +1,11 @@
+# Build artifacts
+build/
+
+# Model files
+*.gguf
+*.bin
+embedding.mlpackage/
+
+# Python cache
+__pycache__/
+*.py[cod]
