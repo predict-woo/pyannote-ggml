@@ -24,9 +24,8 @@ add_subdirectory(../segmentation-ggml segmentation-ggml)
 # Add embedding-core library
 add_subdirectory(../embedding-ggml embedding-ggml)
 
-# Diarization sources
-add_executable(diarization-ggml
-    src/main.cpp
+# Diarization library (shared code)
+add_library(diarization-lib STATIC
     src/diarization.cpp
     src/powerset.cpp
     src/aggregation.cpp
@@ -35,35 +34,48 @@ add_executable(diarization-ggml
     src/clustering.cpp
     src/fastcluster/fastcluster.cpp
     src/rttm.cpp
+    src/streaming.cpp
+    src/provisional.cpp
 )
 
-target_include_directories(diarization-ggml PRIVATE
+target_include_directories(diarization-lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(diarization-ggml PRIVATE
+target_link_libraries(diarization-lib PUBLIC
     segmentation-core
     embedding-core
 )
 
 # Accelerate framework for PLDA/VBx linear algebra
 if(APPLE)
-    target_link_libraries(diarization-ggml PRIVATE "-framework Accelerate")
-    target_compile_definitions(diarization-ggml PRIVATE ACCELERATE_NEW_LAPACK)
+    target_link_libraries(diarization-lib PUBLIC "-framework Accelerate")
+    target_compile_definitions(diarization-lib PUBLIC ACCELERATE_NEW_LAPACK)
 endif()
 
 # CoreML support
 if(EMBEDDING_COREML)
-    target_link_libraries(diarization-ggml PRIVATE embedding-coreml)
-    target_compile_definitions(diarization-ggml PRIVATE EMBEDDING_USE_COREML)
+    target_link_libraries(diarization-lib PUBLIC embedding-coreml)
+    target_compile_definitions(diarization-lib PUBLIC EMBEDDING_USE_COREML)
 endif()
 
 if(SEGMENTATION_COREML)
-    target_link_libraries(diarization-ggml PRIVATE segmentation-coreml)
-    target_compile_definitions(diarization-ggml PRIVATE SEGMENTATION_USE_COREML)
+    target_link_libraries(diarization-lib PUBLIC segmentation-coreml)
+    target_compile_definitions(diarization-lib PUBLIC SEGMENTATION_USE_COREML)
 endif()
 
+# Main executable
+add_executable(diarization-ggml src/main.cpp)
+target_link_libraries(diarization-ggml PRIVATE diarization-lib)
 set_target_properties(diarization-ggml PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
+# Streaming test executable
+add_executable(streaming_test tests/test_streaming.cpp)
+target_link_libraries(streaming_test PRIVATE diarization-lib)
+set_target_properties(streaming_test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
