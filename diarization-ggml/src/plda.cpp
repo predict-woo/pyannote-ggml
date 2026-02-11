@@ -1,9 +1,10 @@
 #include "plda.h"
 
 #include <Accelerate/Accelerate.h>
+#include <ggml.h>
+#include <gguf.h>
 
 #include <cmath>
-#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -13,53 +14,61 @@ namespace diarization {
 static constexpr int XVEC_DIM = 256;
 static constexpr int LDA_DIM  = 128;
 
+static bool load_f64_tensor(struct ggml_context* ctx, struct gguf_context* gguf_ctx,
+                            FILE* f, const char* name, std::vector<double>& out, size_t expected) {
+    struct ggml_tensor* tensor = ggml_get_tensor(ctx, name);
+    if (!tensor) {
+        fprintf(stderr, "plda_load: tensor '%s' not found\n", name);
+        return false;
+    }
+    if (ggml_nelements(tensor) != static_cast<int64_t>(expected)) {
+        fprintf(stderr, "plda_load: tensor '%s' has %lld elements, expected %zu\n",
+                name, (long long)ggml_nelements(tensor), expected);
+        return false;
+    }
+
+    int idx = gguf_find_tensor(gguf_ctx, name);
+    size_t offset = gguf_get_data_offset(gguf_ctx) + gguf_get_tensor_offset(gguf_ctx, idx);
+
+    out.resize(expected);
+    fseek(f, (long)offset, SEEK_SET);
+    return fread(out.data(), sizeof(double), expected, f) == expected;
+}
+
 bool plda_load(const std::string& path, PLDAModel& model) {
+    struct ggml_context* ctx = nullptr;
+    struct gguf_init_params params = { .no_alloc = true, .ctx = &ctx };
+
+    struct gguf_context* gguf_ctx = gguf_init_from_file(path.c_str(), params);
+    if (!gguf_ctx) {
+        fprintf(stderr, "plda_load: cannot open GGUF file '%s'\n", path.c_str());
+        return false;
+    }
+
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) {
-        fprintf(stderr, "plda_load: cannot open '%s'\n", path.c_str());
+        gguf_free(gguf_ctx);
+        ggml_free(ctx);
         return false;
     }
-
-    char magic[4];
-    if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "PLDA", 4) != 0) {
-        fprintf(stderr, "plda_load: bad magic in '%s'\n", path.c_str());
-        fclose(f);
-        return false;
-    }
-
-    uint32_t version = 0;
-    if (fread(&version, sizeof(uint32_t), 1, f) != 1 || version != 1) {
-        fprintf(stderr, "plda_load: unsupported version %u in '%s'\n",
-                version, path.c_str());
-        fclose(f);
-        return false;
-    }
-
-    model.mean1.resize(XVEC_DIM);
-    model.mean2.resize(LDA_DIM);
-    model.lda.resize(XVEC_DIM * LDA_DIM);
-    model.plda_mu.resize(LDA_DIM);
-    model.plda_tr.resize(LDA_DIM * LDA_DIM);
-    model.plda_psi.resize(LDA_DIM);
 
     bool ok = true;
-    ok = ok && fread(model.mean1.data(),    sizeof(double), XVEC_DIM,           f) == static_cast<size_t>(XVEC_DIM);
-    ok = ok && fread(model.mean2.data(),    sizeof(double), LDA_DIM,            f) == static_cast<size_t>(LDA_DIM);
-    ok = ok && fread(model.lda.data(),      sizeof(double), XVEC_DIM * LDA_DIM, f) == static_cast<size_t>(XVEC_DIM * LDA_DIM);
-    ok = ok && fread(model.plda_mu.data(),  sizeof(double), LDA_DIM,            f) == static_cast<size_t>(LDA_DIM);
-    ok = ok && fread(model.plda_tr.data(),  sizeof(double), LDA_DIM * LDA_DIM,  f) == static_cast<size_t>(LDA_DIM * LDA_DIM);
-    ok = ok && fread(model.plda_psi.data(), sizeof(double), LDA_DIM,            f) == static_cast<size_t>(LDA_DIM);
+    ok = ok && load_f64_tensor(ctx, gguf_ctx, f, "plda.mean1", model.mean1,    XVEC_DIM);
+    ok = ok && load_f64_tensor(ctx, gguf_ctx, f, "plda.mean2", model.mean2,    LDA_DIM);
+    ok = ok && load_f64_tensor(ctx, gguf_ctx, f, "plda.lda",   model.lda,      XVEC_DIM * LDA_DIM);
+    ok = ok && load_f64_tensor(ctx, gguf_ctx, f, "plda.mu",    model.plda_mu,  LDA_DIM);
+    ok = ok && load_f64_tensor(ctx, gguf_ctx, f, "plda.tr",    model.plda_tr,  LDA_DIM * LDA_DIM);
+    ok = ok && load_f64_tensor(ctx, gguf_ctx, f, "plda.psi",   model.plda_psi, LDA_DIM);
 
     fclose(f);
+    gguf_free(gguf_ctx);
+    ggml_free(ctx);
 
+    model.loaded = ok;
     if (!ok) {
-        fprintf(stderr, "plda_load: truncated file '%s'\n", path.c_str());
-        model.loaded = false;
-        return false;
+        fprintf(stderr, "plda_load: failed to load tensors from '%s'\n", path.c_str());
     }
-
-    model.loaded = true;
-    return true;
+    return ok;
 }
 
 static void l2_normalize_rows(double* data, int rows, int cols) {

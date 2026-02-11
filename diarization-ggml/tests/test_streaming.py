@@ -59,11 +59,11 @@ def test_streaming_offline_equivalence(audio_path: Path, verbose: bool = False):
         return False
     
     # Model paths (relative to build dir when running from diarization-ggml)
-    seg_gguf = REPO_ROOT / "segmentation-ggml" / "segmentation.gguf"
-    emb_gguf = REPO_ROOT / "embedding-ggml" / "embedding.gguf"
-    plda_bin = DIARIZATION_DIR / "plda.bin"
-    emb_coreml = REPO_ROOT / "embedding-ggml" / "embedding.mlpackage"
-    seg_coreml = REPO_ROOT / "segmentation-ggml" / "segmentation.mlpackage"
+    seg_gguf = REPO_ROOT / "models" / "segmentation-ggml" / "segmentation.gguf"
+    emb_gguf = REPO_ROOT / "models" / "embedding-ggml" / "embedding.gguf"
+    plda_bin = DIARIZATION_DIR / "plda.gguf"
+    emb_coreml = REPO_ROOT / "models" / "embedding-ggml" / "embedding.mlpackage"
+    seg_coreml = REPO_ROOT / "models" / "segmentation-ggml" / "segmentation.mlpackage"
     
     # Check required files
     for path, name in [(plda_bin, "PLDA model"), (emb_coreml, "Embedding CoreML"), (seg_coreml, "Segmentation CoreML")]:

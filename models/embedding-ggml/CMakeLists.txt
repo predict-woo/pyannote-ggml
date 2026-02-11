@@ -8,7 +8,7 @@ option(EMBEDDING_COREML "Enable CoreML acceleration" OFF)
 
 # Add GGML as subdirectory (guarded for multi-project builds)
 if(NOT TARGET ggml)
-    add_subdirectory(../ggml ggml)
+    add_subdirectory(../../ggml ${CMAKE_CURRENT_BINARY_DIR}/ggml)
 endif()
 
 # Add kaldi-native-fbank (disable tests/python builds, guarded for multi-project builds)
@@ -27,7 +27,7 @@ add_library(embedding-core STATIC
 target_include_directories(embedding-core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/kaldi-native-fbank
-    ../ggml/include
+    ../../ggml/include
 )
 
 target_link_libraries(embedding-core PUBLIC ggml kaldi-native-fbank-core)

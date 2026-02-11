@@ -108,16 +108,21 @@ static void print_segments_json(const std::vector<DiarizationResult::Segment>& s
     printf("]");
 }
 
-static void print_json_push(int chunk, double time, const std::vector<DiarizationResult::Segment>& segments) {
-    printf("{\"type\":\"push\",\"chunk\":%d,\"time\":%.1f,\"segments\":", chunk, time);
-    print_segments_json(segments);
-    printf("}\n");
+static void print_json_push(int chunk, double time, const std::vector<VADChunk>& vad_chunks) {
+    int total_active = 0;
+    for (const auto& vc : vad_chunks) {
+        for (int f = 0; f < vc.num_frames; f++) {
+            if (vc.vad[f] == 1.0f) total_active++;
+        }
+    }
+    printf("{\"type\":\"push\",\"chunk\":%d,\"time\":%.1f,\"num_vad_frames\":589,\"vad_active_frames\":%d}\n",
+           chunk, time, total_active);
     fflush(stdout);
 }
 
-static void print_json_recluster(int chunk, double time, const std::vector<DiarizationResult::Segment>& segments) {
+static void print_json_recluster(int chunk, double time, const DiarizationResult& result) {
     printf("{\"type\":\"recluster\",\"chunk\":%d,\"time\":%.1f,\"segments\":", chunk, time);
-    print_segments_json(segments);
+    print_segments_json(result.segments);
     printf("}\n");
     fflush(stdout);
 }
@@ -150,9 +155,9 @@ static void print_usage(const char* program) {
     fprintf(stderr, "  --seg-coreml <path>   Path to CoreML segmentation model\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Default paths (if not specified):\n");
-    fprintf(stderr, "  PLDA: plda.bin\n");
-    fprintf(stderr, "  Embedding CoreML: ../embedding-ggml/embedding.mlpackage\n");
-    fprintf(stderr, "  Segmentation CoreML: ../segmentation-ggml/segmentation.mlpackage\n");
+    fprintf(stderr, "  PLDA: plda.gguf\n");
+    fprintf(stderr, "  Embedding CoreML: ../models/embedding-ggml/embedding.mlpackage\n");
+    fprintf(stderr, "  Segmentation CoreML: ../models/segmentation-ggml/segmentation.mlpackage\n");
 }
 
 // ============================================================================
@@ -163,7 +168,7 @@ int main(int argc, char** argv) {
     // Parse arguments
     std::string audio_path;
     std::string output_path;
-    std::string plda_path = "plda.bin";
+    std::string plda_path = "plda.gguf";
     std::string coreml_path = "../embedding-ggml/embedding.mlpackage";
     std::string seg_coreml_path = "../segmentation-ggml/segmentation.mlpackage";
     
@@ -213,9 +218,6 @@ int main(int argc, char** argv) {
     config.plda_path = plda_path;
     config.coreml_path = coreml_path;
     config.seg_coreml_path = seg_coreml_path;
-    config.recluster_interval_sec = 60;
-    config.new_speaker_threshold = 0.6f;
-    config.provisional_output = true;
     
     // ========================================================================
     // Init-only test
@@ -271,33 +273,36 @@ int main(int argc, char** argv) {
     int chunks_pushed = 0;
     double total_push_time_ms = 0.0;
     
-    std::vector<DiarizationResult::Segment> last_segments;
+    std::vector<VADChunk> last_vad_chunks;
     
     for (int offset = 0; offset < num_samples; offset += STEP_SAMPLES) {
         int chunk_size = std::min(STEP_SAMPLES, num_samples - offset);
         
         auto t_start = std::chrono::high_resolution_clock::now();
-        auto segments = streaming_push(state, audio_samples.data() + offset, chunk_size);
+        auto vad_chunks = streaming_push(state, audio_samples.data() + offset, chunk_size);
         auto t_end = std::chrono::high_resolution_clock::now();
         
         double push_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
         total_push_time_ms += push_ms;
         chunks_pushed++;
         
-        last_segments = segments;
+        if (!vad_chunks.empty()) {
+            last_vad_chunks = std::move(vad_chunks);
+        }
         
         double current_time = static_cast<double>(chunks_pushed);
         bool is_recluster_point = (chunks_pushed % 60 == 0) && chunks_pushed > 0;
         
         if (json_stream) {
             if (is_recluster_point) {
-                print_json_recluster(chunks_pushed, current_time, segments);
+                DiarizationResult recluster_result = streaming_recluster(state);
+                print_json_recluster(chunks_pushed, current_time, recluster_result);
             } else {
-                print_json_push(chunks_pushed, current_time, segments);
+                print_json_push(chunks_pushed, current_time, last_vad_chunks);
             }
         } else if (benchmark) {
-            fprintf(stderr, "Push %d: %d samples, %.1f ms, %zu segments\n",
-                    chunks_pushed, chunk_size, push_ms, segments.size());
+            fprintf(stderr, "Push %d: %d samples, %.1f ms, %zu vad_chunks\n",
+                    chunks_pushed, chunk_size, push_ms, last_vad_chunks.size());
         }
         
         if (provisional_only && chunks_pushed >= 30) {
@@ -306,14 +311,15 @@ int main(int argc, char** argv) {
         
         if (recluster_test && chunks_pushed == 60) {
             fprintf(stderr, "Forcing recluster at 60s...\n");
-            streaming_recluster(state);
+            DiarizationResult recluster_result = streaming_recluster(state);
+            fprintf(stderr, "Recluster returned %zu segments\n", recluster_result.segments.size());
         }
     }
     
     double avg_push_ms = total_push_time_ms / chunks_pushed;
     if (!json_stream) {
         fprintf(stderr, "\nPushed %d chunks, avg push time: %.1f ms\n", chunks_pushed, avg_push_ms);
-        fprintf(stderr, "Provisional segments: %zu\n", last_segments.size());
+        fprintf(stderr, "VAD chunks from last push: %zu\n", last_vad_chunks.size());
     }
     
     if (!push_only && !provisional_only) {

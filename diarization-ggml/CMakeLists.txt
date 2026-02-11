@@ -8,21 +8,21 @@ option(SEGMENTATION_COREML "Enable CoreML acceleration for segmentation" OFF)
 
 # Add GGML (guarded — may already be added by sub-projects)
 if(NOT TARGET ggml)
-    add_subdirectory(../ggml ggml)
+    add_subdirectory(../ggml ${CMAKE_CURRENT_BINARY_DIR}/ggml)
 endif()
 
 # kaldi-native-fbank (guarded, suppress tests/python)
 if(NOT TARGET kaldi-native-fbank-core)
     set(KALDI_NATIVE_FBANK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(KALDI_NATIVE_FBANK_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
-    add_subdirectory(../embedding-ggml/kaldi-native-fbank kaldi-native-fbank)
+    add_subdirectory(../models/embedding-ggml/kaldi-native-fbank ${CMAKE_CURRENT_BINARY_DIR}/kaldi-native-fbank)
 endif()
 
 # Add segmentation-core library
-add_subdirectory(../segmentation-ggml segmentation-ggml)
+add_subdirectory(../models/segmentation-ggml ${CMAKE_CURRENT_BINARY_DIR}/segmentation-ggml)
 
 # Add embedding-core library
-add_subdirectory(../embedding-ggml embedding-ggml)
+add_subdirectory(../models/embedding-ggml ${CMAKE_CURRENT_BINARY_DIR}/embedding-ggml)
 
 # Diarization library (shared code)
 add_library(diarization-lib STATIC

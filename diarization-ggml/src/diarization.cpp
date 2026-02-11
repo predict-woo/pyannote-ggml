@@ -8,8 +8,8 @@
 
 // Both model.h files have unique include guards (SEGMENTATION_GGML_MODEL_H, EMBEDDING_GGML_MODEL_H).
 // Use explicit relative paths since both libraries export "model.h" in their PUBLIC includes.
-#include "../../segmentation-ggml/src/model.h"
-#include "../../embedding-ggml/src/model.h"
+#include "../../models/segmentation-ggml/src/model.h"
+#include "../../models/embedding-ggml/src/model.h"
 #include "fbank.h"
 
 #ifdef EMBEDDING_USE_COREML

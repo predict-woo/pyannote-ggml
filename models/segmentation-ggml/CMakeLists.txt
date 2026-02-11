@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Add GGML as subdirectory (guarded for multi-project builds)
 if(NOT TARGET ggml)
-    add_subdirectory(../ggml ggml)
+    add_subdirectory(../../ggml ${CMAKE_CURRENT_BINARY_DIR}/ggml)
 endif()
 
 # Optional Metal backend support (enabled by default on macOS)
@@ -25,7 +25,7 @@ add_library(segmentation-core STATIC
 
 target_include_directories(segmentation-core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ../ggml/include
+    ../../ggml/include
 )
 
 target_link_libraries(segmentation-core PUBLIC ggml)

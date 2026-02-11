@@ -9,7 +9,7 @@ Currently compares the final RTTM output (end-to-end). Structured to support
 per-stage comparison when the C++ binary gains --dump-stage support.
 
 Usage:
-    python compare_pipeline.py --audio audio.wav --seg-model seg.gguf --emb-model emb.gguf --plda plda.bin
+    python compare_pipeline.py --audio audio.wav --seg-model seg.gguf --emb-model emb.gguf --plda plda.gguf
     python compare_pipeline.py --help
 """
 

@@ -14,10 +14,6 @@ struct StreamingConfig {
     std::string coreml_path;       // embedding CoreML
     std::string seg_coreml_path;   // segmentation CoreML
     
-    // Streaming parameters
-    int recluster_interval_sec = 60;      // Recluster every N seconds of audio
-    float new_speaker_threshold = 0.6f;   // Cosine distance threshold for new speaker
-    bool provisional_output = true;       // Enable provisional labels
 };
 
 struct StreamingState {
@@ -51,6 +47,7 @@ struct StreamingState {
     int last_recluster_chunk = 0;
     double audio_time_processed = 0.0;
     bool finalized = false;
+    int samples_trimmed = 0;  // absolute sample offset trimmed from audio_buffer front
     
     // Model contexts (owned, freed in streaming_free)
     struct segmentation_coreml_context* seg_coreml_ctx = nullptr;

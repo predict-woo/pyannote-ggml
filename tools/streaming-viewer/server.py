@@ -23,9 +23,9 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 STREAMING_TEST_BIN = PROJECT_ROOT / "diarization-ggml" / "build" / "bin" / "streaming_test"
-PLDA_PATH = PROJECT_ROOT / "diarization-ggml" / "plda.bin"
-EMBEDDING_COREML = PROJECT_ROOT / "embedding-ggml" / "embedding.mlpackage"
-SEG_COREML = PROJECT_ROOT / "segmentation-ggml" / "segmentation.mlpackage"
+PLDA_PATH = PROJECT_ROOT / "diarization-ggml" / "plda.gguf"
+EMBEDDING_COREML = PROJECT_ROOT / "models" / "embedding-ggml" / "embedding.mlpackage"
+SEG_COREML = PROJECT_ROOT / "models" / "segmentation-ggml" / "segmentation.mlpackage"
 
 uploaded_files = {}
 
@@ -148,5 +148,5 @@ if __name__ == '__main__':
     print(f"Project root: {PROJECT_ROOT}")
     print(f"Streaming test binary: {STREAMING_TEST_BIN}")
     print(f"Binary exists: {STREAMING_TEST_BIN.exists()}")
-    print("\nStarting server at http://localhost:5000")
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    print("\nStarting server at http://localhost:8080")
+    socketio.run(app, host='0.0.0.0', port=8080, debug=True)

@@ -5,7 +5,7 @@
 #include "plda.h"
 #include "powerset.h"
 #include "vbx.h"
-#include "../../embedding-ggml/src/fbank.h"
+#include "../../models/embedding-ggml/src/fbank.h"
 
 #ifdef SEGMENTATION_USE_COREML
 #include "segmentation_coreml_bridge.h"
@@ -29,6 +29,136 @@ static constexpr int NUM_POWERSET_CLASSES    = 7;
 static constexpr int NUM_LOCAL_SPEAKERS      = 3;
 static constexpr int EMBEDDING_DIM           = 256;
 static constexpr int FBANK_NUM_BINS          = 80;
+
+// Process a single chunk at state->chunks_processed. The chunk audio is cropped
+// from audio_buffer with zero-padding if it extends past total_samples.
+// Returns true on success, false on segmentation/embedding failure.
+static bool process_one_chunk(StreamingState* state, int total_samples) {
+    const int chunk_start = state->chunks_processed * STEP_SAMPLES - state->samples_trimmed;
+    int copy_start = chunk_start;
+    int copy_len = CHUNK_SAMPLES;
+    int pad_front = 0;
+
+    if (copy_start < 0) {
+        pad_front = -copy_start;
+        copy_start = 0;
+        copy_len = CHUNK_SAMPLES - pad_front;
+    }
+
+    if (copy_start + copy_len > total_samples) {
+        copy_len = total_samples - copy_start;
+    }
+    if (copy_len < 0) copy_len = 0;
+
+    std::vector<float> cropped(CHUNK_SAMPLES, 0.0f);
+    if (copy_len > 0) {
+        std::memcpy(cropped.data() + pad_front,
+                   state->audio_buffer.data() + copy_start,
+                   static_cast<size_t>(copy_len) * sizeof(float));
+    }
+
+    std::vector<float> chunk_logits(FRAMES_PER_CHUNK * NUM_POWERSET_CLASSES);
+
+#ifdef SEGMENTATION_USE_COREML
+    if (state->seg_coreml_ctx) {
+        segmentation_coreml_infer(state->seg_coreml_ctx,
+                                  cropped.data(), CHUNK_SAMPLES,
+                                  chunk_logits.data(),
+                                  FRAMES_PER_CHUNK * NUM_POWERSET_CLASSES);
+    } else {
+        fprintf(stderr, "Error: no segmentation model available\n");
+        return false;
+    }
+#else
+    fprintf(stderr, "Error: non-CoreML segmentation not supported in streaming\n");
+    return false;
+#endif
+
+    std::vector<float> chunk_binarized(FRAMES_PER_CHUNK * NUM_LOCAL_SPEAKERS);
+    diarization::powerset_to_multilabel(
+        chunk_logits.data(), 1, FRAMES_PER_CHUNK, chunk_binarized.data());
+
+    state->binarized.insert(
+        state->binarized.end(),
+        chunk_binarized.begin(),
+        chunk_binarized.end());
+
+    embedding::fbank_result fbank =
+        embedding::compute_fbank(cropped.data(), CHUNK_SAMPLES, SAMPLE_RATE);
+    const int num_fbank_frames = fbank.num_frames;
+
+    for (int s = 0; s < NUM_LOCAL_SPEAKERS; s++) {
+        bool all_zero = true;
+        for (int f = 0; f < FRAMES_PER_CHUNK; f++) {
+            if (chunk_binarized[f * NUM_LOCAL_SPEAKERS + s] != 0.0f) {
+                all_zero = false;
+                break;
+            }
+        }
+
+        std::vector<float> embedding(EMBEDDING_DIM);
+
+        if (all_zero) {
+            const float nan_val = std::nanf("");
+            for (int d = 0; d < EMBEDDING_DIM; d++) {
+                embedding[d] = nan_val;
+            }
+        } else {
+            std::vector<float> masked_fbank(fbank.data);
+
+            for (int ft = 0; ft < num_fbank_frames; ft++) {
+                int seg_frame =
+                    static_cast<int>(
+                        static_cast<long long>(ft) * FRAMES_PER_CHUNK / num_fbank_frames);
+                if (seg_frame >= FRAMES_PER_CHUNK) {
+                    seg_frame = FRAMES_PER_CHUNK - 1;
+                }
+
+                const float mask_val = chunk_binarized[seg_frame * NUM_LOCAL_SPEAKERS + s];
+                if (mask_val == 0.0f) {
+                    std::memset(&masked_fbank[ft * FBANK_NUM_BINS], 0,
+                               FBANK_NUM_BINS * sizeof(float));
+                }
+            }
+
+#ifdef EMBEDDING_USE_COREML
+            if (state->emb_coreml_ctx) {
+                embedding_coreml_encode(state->emb_coreml_ctx,
+                                       static_cast<int64_t>(num_fbank_frames),
+                                       masked_fbank.data(),
+                                       embedding.data());
+            } else {
+                fprintf(stderr, "Error: no embedding model available\n");
+                continue;
+            }
+#else
+            fprintf(stderr, "Error: non-CoreML embedding not supported in streaming\n");
+            continue;
+#endif
+        }
+
+        state->embeddings.insert(
+            state->embeddings.end(),
+            embedding.begin(),
+            embedding.end());
+        state->chunk_idx.push_back(state->chunks_processed);
+        state->local_speaker_idx.push_back(s);
+    }
+
+    state->chunks_processed++;
+    state->audio_time_processed =
+        static_cast<double>(state->chunks_processed) *
+        static_cast<double>(STEP_SAMPLES) / static_cast<double>(SAMPLE_RATE);
+
+    const int abs_next_start = state->chunks_processed * STEP_SAMPLES;
+    const int buf_next_start = abs_next_start - state->samples_trimmed;
+    if (buf_next_start > 0 && buf_next_start < static_cast<int>(state->audio_buffer.size())) {
+        state->audio_buffer.erase(state->audio_buffer.begin(), state->audio_buffer.begin() + buf_next_start);
+        state->samples_trimmed = abs_next_start;
+    }
+
+    return true;
+}
 
 StreamingState* streaming_init(const StreamingConfig& config) {
     StreamingState* state = new StreamingState();
@@ -86,11 +216,12 @@ StreamingState* streaming_init(const StreamingConfig& config) {
     state->finalized = false;
     state->num_speakers = 0;
     state->num_provisional_speakers = 0;
+    state->samples_trimmed = 0;
     
     return state;
 }
 
-std::vector<DiarizationResult::Segment> streaming_push(
+std::vector<VADChunk> streaming_push(
     StreamingState* state,
     const float* samples,
     int num_samples) {
@@ -104,8 +235,6 @@ std::vector<DiarizationResult::Segment> streaming_push(
         samples,
         samples + num_samples);
     
-    const int total_samples = static_cast<int>(state->audio_buffer.size());
-    
     int samples_needed_for_next_chunk;
     if (state->chunks_processed == 0) {
         samples_needed_for_next_chunk = CHUNK_SAMPLES;
@@ -114,118 +243,50 @@ std::vector<DiarizationResult::Segment> streaming_push(
             state->chunks_processed * STEP_SAMPLES + CHUNK_SAMPLES;
     }
     
-    std::vector<float> cropped(CHUNK_SAMPLES, 0.0f);
-    std::vector<float> chunk_logits(FRAMES_PER_CHUNK * NUM_POWERSET_CLASSES);
-    std::vector<float> chunk_binarized(FRAMES_PER_CHUNK * NUM_LOCAL_SPEAKERS);
+    std::vector<VADChunk> result;
     
-    while (total_samples >= samples_needed_for_next_chunk) {
-        const int chunk_start = state->chunks_processed * STEP_SAMPLES;
-        int copy_start = chunk_start;
-        int copy_len = CHUNK_SAMPLES;
-        int pad_front = 0;
+    int total_abs_samples = static_cast<int>(state->audio_buffer.size()) + state->samples_trimmed;
+    while (total_abs_samples >= samples_needed_for_next_chunk) {
+        const int chunk_idx_before = state->chunks_processed;
+        const int buf_samples = static_cast<int>(state->audio_buffer.size());
         
-        if (copy_start < 0) {
-            pad_front = -copy_start;
-            copy_start = 0;
-            copy_len = CHUNK_SAMPLES - pad_front;
-        }
-        
-        if (copy_start + copy_len > total_samples) {
-            copy_len = total_samples - copy_start;
-        }
-        
-        std::fill(cropped.begin(), cropped.end(), 0.0f);
-        if (copy_len > 0) {
-            std::memcpy(cropped.data() + pad_front,
-                       state->audio_buffer.data() + copy_start,
-                       static_cast<size_t>(copy_len) * sizeof(float));
-        }
-        
-#ifdef SEGMENTATION_USE_COREML
-        if (state->seg_coreml_ctx) {
-            segmentation_coreml_infer(state->seg_coreml_ctx,
-                                      cropped.data(), CHUNK_SAMPLES,
-                                      chunk_logits.data(),
-                                      FRAMES_PER_CHUNK * NUM_POWERSET_CLASSES);
-        } else {
-            fprintf(stderr, "Error: no segmentation model available\n");
+        if (!process_one_chunk(state, buf_samples)) {
             break;
         }
-#else
-        fprintf(stderr, "Error: non-CoreML segmentation not supported in streaming\n");
-        break;
-#endif
         
-        diarization::powerset_to_multilabel(
-            chunk_logits.data(), 1, FRAMES_PER_CHUNK, chunk_binarized.data());
+        const float* chunk_binarized = state->binarized.data() +
+            static_cast<size_t>(chunk_idx_before) * FRAMES_PER_CHUNK * NUM_LOCAL_SPEAKERS;
         
-        state->binarized.insert(
-            state->binarized.end(),
-            chunk_binarized.begin(),
-            chunk_binarized.end());
-        
-        embedding::fbank_result fbank =
-            embedding::compute_fbank(cropped.data(), CHUNK_SAMPLES, SAMPLE_RATE);
-        const int num_fbank_frames = fbank.num_frames;
-        
-        for (int s = 0; s < NUM_LOCAL_SPEAKERS; s++) {
-            std::vector<float> masked_fbank(fbank.data);
-            
-            for (int ft = 0; ft < num_fbank_frames; ft++) {
-                int seg_frame =
-                    static_cast<int>(
-                        static_cast<long long>(ft) * FRAMES_PER_CHUNK / num_fbank_frames);
-                if (seg_frame >= FRAMES_PER_CHUNK) {
-                    seg_frame = FRAMES_PER_CHUNK - 1;
-                }
-                
-                const float mask_val = chunk_binarized[seg_frame * NUM_LOCAL_SPEAKERS + s];
-                if (mask_val == 0.0f) {
-                    std::memset(&masked_fbank[ft * FBANK_NUM_BINS], 0,
-                               FBANK_NUM_BINS * sizeof(float));
+        VADChunk vad_chunk;
+        vad_chunk.chunk_index = chunk_idx_before;
+        vad_chunk.start_time = static_cast<double>(chunk_idx_before) *
+            (static_cast<double>(STEP_SAMPLES) / static_cast<double>(SAMPLE_RATE));
+        vad_chunk.duration = 10.0;
+        vad_chunk.num_frames = FRAMES_PER_CHUNK;
+        vad_chunk.vad.resize(FRAMES_PER_CHUNK);
+        for (int f = 0; f < FRAMES_PER_CHUNK; f++) {
+            float any_active = 0.0f;
+            for (int s = 0; s < NUM_LOCAL_SPEAKERS; s++) {
+                if (chunk_binarized[f * NUM_LOCAL_SPEAKERS + s] != 0.0f) {
+                    any_active = 1.0f;
+                    break;
                 }
             }
-            
-            std::vector<float> embedding(EMBEDDING_DIM);
-            
-#ifdef EMBEDDING_USE_COREML
-            if (state->emb_coreml_ctx) {
-                embedding_coreml_encode(state->emb_coreml_ctx,
-                                       static_cast<int64_t>(num_fbank_frames),
-                                       masked_fbank.data(),
-                                       embedding.data());
-            } else {
-                fprintf(stderr, "Error: no embedding model available\n");
-                continue;
-            }
-#else
-            fprintf(stderr, "Error: non-CoreML embedding not supported in streaming\n");
-            continue;
-#endif
-            
-            state->embeddings.insert(
-                state->embeddings.end(),
-                embedding.begin(),
-                embedding.end());
-            state->chunk_idx.push_back(state->chunks_processed);
-            state->local_speaker_idx.push_back(s);
+            vad_chunk.vad[f] = any_active;
         }
+        result.push_back(std::move(vad_chunk));
         
-        state->chunks_processed++;
-        state->audio_time_processed = 
-            static_cast<double>(state->chunks_processed) * 
-            static_cast<double>(STEP_SAMPLES) / static_cast<double>(SAMPLE_RATE);
-        
+        total_abs_samples = static_cast<int>(state->audio_buffer.size()) + state->samples_trimmed;
         samples_needed_for_next_chunk = 
             state->chunks_processed * STEP_SAMPLES + CHUNK_SAMPLES;
     }
     
-    return {};
+    return result;
 }
 
-void streaming_recluster(StreamingState* state) {
+DiarizationResult streaming_recluster(StreamingState* state) {
     if (!state || state->embeddings.empty()) {
-        return;
+        return {};
     }
     
     const int num_chunks = state->chunks_processed;
@@ -243,15 +304,15 @@ void streaming_recluster(StreamingState* state) {
         filtered_emb,
         filt_chunk_idx,
         filt_speaker_idx);
+
     
     const int num_filtered = static_cast<int>(filt_chunk_idx.size());
     
-    // Edge case: too few embeddings for clustering
     if (num_filtered < 2) {
         state->global_labels.assign(static_cast<size_t>(num_filtered), 0);
         state->num_speakers = (num_filtered > 0) ? 1 : 0;
         state->last_recluster_chunk = state->chunks_processed;
-        return;
+        return {};
     }
     
     // Constants (match diarization.cpp)
@@ -320,11 +381,10 @@ void streaming_recluster(StreamingState* state) {
             plda_features.data(), PLDA_DIM,
             state->plda.plda_psi.data(), VBX_FA, VBX_FB, VBX_MAX_ITERS,
             vbx_result)) {
-        // VBx failed, fall back to single cluster
         state->global_labels.assign(static_cast<size_t>(num_filtered), 0);
         state->num_speakers = 1;
         state->last_recluster_chunk = state->chunks_processed;
-        return;
+        return {};
     }
     
     // Step 6: Compute centroids from VBx soft assignments
@@ -369,23 +429,18 @@ void streaming_recluster(StreamingState* state) {
     
     const int total_emb = num_chunks * NUM_LOCAL_SPEAKERS;
     std::vector<float> soft_clusters(
-        static_cast<size_t>(total_emb) * num_clusters,
-        std::nanf(""));
+        static_cast<size_t>(total_emb) * num_clusters);
     
-    for (int i = 0; i < num_filtered; i++) {
-        const int c = filt_chunk_idx[i];
-        const int s = filt_speaker_idx[i];
-        const int flat_idx = c * NUM_LOCAL_SPEAKERS + s;
-        const float* emb = filtered_emb.data() + i * EMBEDDING_DIM;
-        
+    for (int e = 0; e < total_emb; e++) {
+        const float* emb = state->embeddings.data() + e * EMBEDDING_DIM;
         for (int k = 0; k < num_clusters; k++) {
             const float* cent = centroids.data() + k * EMBEDDING_DIM;
             double dist = diarization::cosine_distance(emb, cent, EMBEDDING_DIM);
-            soft_clusters[flat_idx * num_clusters + k] = static_cast<float>(2.0 - dist);
+            soft_clusters[e * num_clusters + k] = static_cast<float>(2.0 - dist);
         }
     }
     
-    std::vector<int> hard_clusters(static_cast<size_t>(total_emb), -2);
+    std::vector<int> hard_clusters(static_cast<size_t>(total_emb), 0);
     diarization::constrained_argmax(
         soft_clusters.data(), num_chunks, NUM_LOCAL_SPEAKERS, num_clusters,
         hard_clusters);
@@ -421,45 +476,22 @@ void streaming_recluster(StreamingState* state) {
     state->num_speakers = num_clusters;
     state->centroids = std::move(centroids);
     state->last_recluster_chunk = state->chunks_processed;
-}
-
-DiarizationResult streaming_finalize(StreamingState* state) {
+    
+    // --- Reconstruction: convert clustering result to DiarizationResult ---
+    // Use hard_clusters directly (includes active-but-not-filtered speakers,
+    // matching offline pipeline behavior)
+    
     DiarizationResult result;
     
-    if (!state || state->finalized) {
-        return result;
-    }
-    
-    // Step 1: Force final recluster
-    streaming_recluster(state);
-    
-    const int num_chunks = state->chunks_processed;
-    const int num_clusters = state->num_speakers;
-    const int num_filtered = static_cast<int>(state->embeddings.size()) / EMBEDDING_DIM;
-    
     if (num_chunks == 0 || num_clusters == 0) {
-        state->finalized = true;
         return result;
     }
     
-    // Constants (match diarization.cpp exactly for byte-identical output)
     constexpr double CHUNK_DURATION = 10.0;
     constexpr double CHUNK_STEP = 1.0;
-    constexpr double FRAME_DURATION = 0.0619375;  // model receptive field duration
-    constexpr double FRAME_STEP = 0.016875;       // seconds
+    constexpr double FRAME_DURATION = 0.0619375;
+    constexpr double FRAME_STEP = 0.016875;
     
-    // Step 2: Reconstruct hard_clusters from global_labels
-    // hard_clusters[c * NUM_LOCAL_SPEAKERS + s] = global speaker label (-2 if inactive)
-    std::vector<int> hard_clusters(
-        static_cast<size_t>(num_chunks) * NUM_LOCAL_SPEAKERS, -2);
-    
-    for (int i = 0; i < num_filtered; i++) {
-        const int c = state->chunk_idx[i];
-        const int s = state->local_speaker_idx[i];
-        hard_clusters[c * NUM_LOCAL_SPEAKERS + s] = state->global_labels[i];
-    }
-    
-    // Step 3: Compute speaker count using aggregation
     diarization::SlidingWindowParams chunk_window = {0.0, CHUNK_DURATION, CHUNK_STEP};
     diarization::SlidingWindowParams frame_window = {chunk_window.start, FRAME_DURATION, FRAME_STEP};
     
@@ -470,8 +502,6 @@ DiarizationResult streaming_finalize(StreamingState* state) {
         chunk_window, frame_window,
         count, total_frames);
     
-    // Step 4: Build clustered_seg from binarized + hard_clusters
-    // clustered_seg[c * FRAMES_PER_CHUNK * num_clusters + f * num_clusters + k]
     std::vector<float> clustered_seg(
         static_cast<size_t>(num_chunks) * FRAMES_PER_CHUNK * num_clusters);
     {
@@ -485,7 +515,6 @@ DiarizationResult streaming_finalize(StreamingState* state) {
             state->binarized.data() + c * FRAMES_PER_CHUNK * NUM_LOCAL_SPEAKERS;
         
         for (int k = 0; k < num_clusters; k++) {
-            // Find all local speakers assigned to cluster k in this chunk
             for (int s = 0; s < NUM_LOCAL_SPEAKERS; s++) {
                 if (chunk_clusters[s] != k) continue;
                 
@@ -503,7 +532,6 @@ DiarizationResult streaming_finalize(StreamingState* state) {
         }
     }
     
-    // Step 5: to_diarization — aggregate + select top-count speakers
     std::vector<float> discrete_diarization;
     diarization::to_diarization(
         clustered_seg.data(), num_chunks, FRAMES_PER_CHUNK, num_clusters,
@@ -511,12 +539,9 @@ DiarizationResult streaming_finalize(StreamingState* state) {
         chunk_window, frame_window,
         discrete_diarization);
     
-    // Free intermediate
     clustered_seg.clear();
     clustered_seg.shrink_to_fit();
     
-    // Step 6: Convert to RTTM segments
-    // Each contiguous run of 1.0 in a speaker column -> one segment
     const int out_frames =
         static_cast<int>(discrete_diarization.size()) / num_clusters;
     
@@ -537,8 +562,6 @@ DiarizationResult streaming_finalize(StreamingState* state) {
                 seg_start_frame = f;
                 in_segment = true;
             } else if (!active && in_segment) {
-                // Segment: [seg_start_frame, f) frames
-                // Use frame midpoint (matches Python Binarize)
                 const double start_time =
                     chunk_window.start + seg_start_frame * FRAME_STEP + 0.5 * FRAME_DURATION;
                 const double duration =
@@ -551,15 +574,36 @@ DiarizationResult streaming_finalize(StreamingState* state) {
         }
     }
     
-    // Step 7: Sort segments by start time
     std::sort(result.segments.begin(), result.segments.end(),
               [](const DiarizationResult::Segment& a,
                  const DiarizationResult::Segment& b) {
                   return a.start < b.start;
               });
     
-    state->finalized = true;
+    return result;
+}
+
+DiarizationResult streaming_finalize(StreamingState* state) {
+    if (!state || state->finalized) {
+        return {};
+    }
     
+    const int total_abs_samples = static_cast<int>(state->audio_buffer.size()) + state->samples_trimmed;
+    const double audio_duration = static_cast<double>(total_abs_samples) /
+                                   static_cast<double>(SAMPLE_RATE);
+    const int offline_num_chunks = std::max(1,
+        1 + static_cast<int>(std::ceil((audio_duration -
+            static_cast<double>(CHUNK_SAMPLES) / static_cast<double>(SAMPLE_RATE)) /
+            (static_cast<double>(STEP_SAMPLES) / static_cast<double>(SAMPLE_RATE)))));
+    
+    while (state->chunks_processed < offline_num_chunks) {
+        if (!process_one_chunk(state, static_cast<int>(state->audio_buffer.size()))) {
+            break;
+        }
+    }
+    
+    DiarizationResult result = streaming_recluster(state);
+    state->finalized = true;
     return result;
 }
 
