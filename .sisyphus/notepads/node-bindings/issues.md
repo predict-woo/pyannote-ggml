@@ -1,0 +1,2 @@
+# Issues — node-bindings plan
+

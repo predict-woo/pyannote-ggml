@@ -1,10 +1,8 @@
 {
-  "active_plan": "/Users/andyye/dev/pyannote-audio/.sisyphus/plans/diarization-ggml.md",
-  "started_at": "2026-01-29T17:02:04.132Z",
+  "active_plan": "/Users/andyye/dev/pyannote-audio/.sisyphus/plans/node-bindings.md",
+  "started_at": "2026-02-11T10:12:47.828Z",
   "session_ids": [
-    "ses_3f573b7f4ffeqhWUprE0xZ6G9G",
-    "ses_3eae0022effeRh7RgCrMOiCWP3",
-    "ses_3b47ceb8bffeGYFCL1Ac726btq"
+    "ses_3b3e77dfdffeLS53CkPGVWLnLY"
   ],
-  "plan_name": "diarization-ggml"
+  "plan_name": "node-bindings"
 }

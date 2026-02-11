@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.node
+
+# pnpm
+.pnpm-store/
+
+# TypeScript
+*.tsbuildinfo
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
