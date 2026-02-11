@@ -1,0 +1,8 @@
+{
+  "name": "@pyannote-cpp-node/darwin-x64",
+  "version": "0.1.0",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "main": "./index.js",
+  "engines": { "node": ">=18" }
+}

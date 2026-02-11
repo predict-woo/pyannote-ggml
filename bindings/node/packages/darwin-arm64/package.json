@@ -1,0 +1,17 @@
+{
+  "name": "@pyannote-cpp-node/darwin-arm64",
+  "version": "0.1.0",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "main": "./index.js",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "install": "cmake-js build",
+    "build": "cmake-js build",
+    "clean": "cmake-js clean"
+  },
+  "dependencies": {
+    "cmake-js": "^7.3.0",
+    "node-addon-api": "^8.3.0"
+  }
+}
