@@ -5,9 +5,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(EMBEDDING_COREML "Enable CoreML acceleration" OFF)
 option(SEGMENTATION_COREML "Enable CoreML acceleration for segmentation" OFF)
+option(DIARIZATION_STATIC "Build all dependencies as static libraries" OFF)
 
 # Add GGML (guarded — may already be added by sub-projects)
 if(NOT TARGET ggml)
+    if(DIARIZATION_STATIC)
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    endif()
     add_subdirectory(../ggml ${CMAKE_CURRENT_BINARY_DIR}/ggml)
 endif()
 
@@ -15,6 +19,9 @@ endif()
 if(NOT TARGET kaldi-native-fbank-core)
     set(KALDI_NATIVE_FBANK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(KALDI_NATIVE_FBANK_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
+    if(DIARIZATION_STATIC)
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    endif()
     add_subdirectory(../models/embedding-ggml/kaldi-native-fbank ${CMAKE_CURRENT_BINARY_DIR}/kaldi-native-fbank)
 endif()
 
