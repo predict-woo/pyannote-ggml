@@ -1,2 +1,8 @@
-// Placeholder — implementation in Task 5
-export {};
+export { Pyannote } from './Pyannote.js';
+export { StreamingSession } from './StreamingSession.js';
+export type {
+  DiarizationResult,
+  ModelConfig,
+  Segment,
+  VADChunk,
+} from './types.js';
