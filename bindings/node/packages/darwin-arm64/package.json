@@ -5,12 +5,19 @@
   "cpu": ["arm64"],
   "main": "./index.js",
   "engines": { "node": ">=18" },
+  "files": [
+    "index.js",
+    "build/Release/pyannote-addon.node"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "install": "cmake-js build",
     "build": "cmake-js build",
     "clean": "cmake-js clean"
   },
-  "dependencies": {
+  "devDependencies": {
     "cmake-js": "^7.3.0",
     "node-addon-api": "^8.3.0"
   }

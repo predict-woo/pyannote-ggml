@@ -4,5 +4,12 @@
   "os": ["darwin"],
   "cpu": ["x64"],
   "main": "./index.js",
-  "engines": { "node": ">=18" }
+  "engines": { "node": ">=18" },
+  "files": [
+    "index.js",
+    "build/Release/pyannote-addon.node"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }
