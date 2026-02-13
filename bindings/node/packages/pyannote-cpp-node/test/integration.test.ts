@@ -164,13 +164,30 @@ describe('Streaming basic flow', () => {
 
     for (const chunk of allChunks) {
       expect(typeof chunk.chunkIndex).toBe('number');
-      expect(typeof chunk.startTime).toBe('number');
-      expect(typeof chunk.duration).toBe('number');
+      expect(typeof chunk.startFrame).toBe('number');
       expect(typeof chunk.numFrames).toBe('number');
-      expect(chunk.numFrames).toBe(589);
+      expect(chunk.numFrames).toBeGreaterThan(0);
+      expect(chunk.numFrames).toBeLessThanOrEqual(589);
       expect(chunk.vad).toBeInstanceOf(Float32Array);
-      expect(chunk.vad.length).toBe(589);
+      expect(chunk.vad.length).toBe(chunk.numFrames);
     }
+
+    session.close();
+    model.close();
+  });
+});
+
+describe('Streaming zero-latency mode', () => {
+  it('returns frames on first push with zero latency', async () => {
+    const model = await Pyannote.load({ ...config, zeroLatency: true });
+    const session = model.createStreamingSession();
+    const audio = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
+
+    const chunk = audio.slice(0, 16000);
+    const vadChunks = await session.push(chunk);
+
+    expect(vadChunks.length).toBeGreaterThan(0);
+    expect(vadChunks[0].startFrame).toBe(0);
 
     session.close();
     model.close();

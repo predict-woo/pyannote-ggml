@@ -178,7 +178,7 @@ Pushes audio samples to the streaming session. Audio must be 16kHz mono `Float32
 
 The first chunk requires 10 seconds of accumulated audio to produce output (the segmentation model uses a 10-second window). After that, each subsequent push returns approximately one `VADChunk` (depending on the 1-second hop size).
 
-The returned VAD chunks contain frame-level voice activity (OR of all speakers) for the newly processed 10-second windows.
+The returned VAD chunks contain frame-level voice activity (OR of all speakers) for the newly covered frames. In normal mode, the first push that produces output returns 589 frames (full 10-second window); subsequent pushes return ~59-60 new frames each. In zero-latency mode, each push returns ~59-60 frames from the start.
 
 **Parameters:**
 - `audio: Float32Array` — Audio samples (16kHz mono, values in [-1.0, 1.0])
@@ -264,24 +264,24 @@ interface ModelConfig {
   pldaPath: string;        // Path to PLDA GGUF model file
   coremlPath: string;      // Path to embedding CoreML .mlpackage directory
   segCoremlPath: string;   // Path to segmentation CoreML .mlpackage directory
+  zeroLatency?: boolean;   // Pre-fill 10s silence so first push returns frames immediately (default: false)
 }
 ```
 
 #### `VADChunk`
 
-Voice activity detection result for a single 10-second audio chunk.
+Voice activity detection result for newly covered frames from a streaming push.
 
 ```typescript
 interface VADChunk {
-  chunkIndex: number;      // Zero-based chunk number (increments every 1 second)
-  startTime: number;       // Absolute start time in seconds (chunkIndex * 1.0)
-  duration: number;        // Always 10.0 (chunk window size)
-  numFrames: number;       // Always 589 (segmentation model output frames)
-  vad: Float32Array;       // [589] frame-level voice activity: 1.0 if any speaker active, 0.0 otherwise
+  chunkIndex: number;      // Zero-based internal chunk number
+  startFrame: number;      // Global frame index of first new frame; time = startFrame * 0.016875
+  numFrames: number;       // Number of new frames (~59-60 per push, or 589 for first chunk in normal mode)
+  vad: Float32Array;       // [numFrames] frame-level voice activity: 1.0 if any speaker active, 0.0 otherwise
 }
 ```
 
-The `vad` array contains 589 frames, each representing approximately 17ms of audio. A value of 1.0 indicates speech activity (any speaker), 0.0 indicates silence.
+Each frame represents approximately 16.875ms of audio (`FRAME_STEP = 0.016875s`). To compute the time of the first frame: `startFrame * 0.016875`. The `vad` array length matches `numFrames` (variable, not always 589). A value of 1.0 indicates speech activity (any speaker), 0.0 indicates silence.
 
 #### `Segment`
 
@@ -415,15 +415,15 @@ async function streamingDiarization() {
 
     const vadChunks = await session.push(chunk);
 
-    // VAD chunks are returned after first 10 seconds
+    // VAD chunks are returned after first 10 seconds (or immediately in zero-latency mode)
     for (const vad of vadChunks) {
-      // Count active frames (speech detected)
       const activeFrames = vad.vad.filter(v => v > 0.5).length;
       const speechRatio = (activeFrames / vad.numFrames * 100).toFixed(1);
+      const startTime = vad.startFrame * 0.016875;
       
       console.log(
-        `Chunk ${vad.chunkIndex}: ${vad.startTime.toFixed(1)}s - ${(vad.startTime + vad.duration).toFixed(1)}s | ` +
-        `Speech: ${speechRatio}%`
+        `Chunk ${vad.chunkIndex}: frame ${vad.startFrame} (${startTime.toFixed(2)}s) | ` +
+        `${vad.numFrames} frames | Speech: ${speechRatio}%`
       );
       totalChunks++;
     }
@@ -630,7 +630,7 @@ During reclustering, all accumulated embeddings are used to compute soft cluster
 | SAMPLE_RATE | 16000 Hz | Audio sample rate |
 | CHUNK_SAMPLES | 160000 | 10-second window size |
 | STEP_SAMPLES | 16000 | 1-second hop between chunks |
-| FRAMES_PER_CHUNK | 589 | Segmentation output frames |
+| FRAMES_PER_CHUNK | 589 | Segmentation output frames per 10s chunk |
 | NUM_LOCAL_SPEAKERS | 3 | Maximum speakers per chunk |
 | EMBEDDING_DIM | 256 | Speaker embedding dimension |
 | FBANK_NUM_BINS | 80 | Mel filterbank bins |
@@ -739,7 +739,7 @@ Measured on Apple M2 Pro with 16 GB RAM:
 
 ### Streaming Performance
 
-- **First chunk latency**: 10 seconds (requires full window)
+- **First chunk latency**: 10 seconds in normal mode (requires full window), or immediate in zero-latency mode
 - **Incremental latency**: ~30ms per 1-second push (after first chunk)
 - **Recluster latency**: ~2 seconds for 30 minutes of audio (~1800 embeddings)
 

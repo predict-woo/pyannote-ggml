@@ -110,13 +110,15 @@ static void print_segments_json(const std::vector<DiarizationResult::Segment>& s
 
 static void print_json_push(int chunk, double time, const std::vector<VADChunk>& vad_chunks) {
     int total_active = 0;
+    int total_frames = 0;
     for (const auto& vc : vad_chunks) {
+        total_frames += vc.num_frames;
         for (int f = 0; f < vc.num_frames; f++) {
             if (vc.vad[f] == 1.0f) total_active++;
         }
     }
-    printf("{\"type\":\"push\",\"chunk\":%d,\"time\":%.1f,\"num_vad_frames\":589,\"vad_active_frames\":%d}\n",
-           chunk, time, total_active);
+    printf("{\"type\":\"push\",\"chunk\":%d,\"time\":%.1f,\"num_vad_frames\":%d,\"vad_active_frames\":%d}\n",
+           chunk, time, total_frames, total_active);
     fflush(stdout);
 }
 
@@ -149,6 +151,9 @@ static void print_usage(const char* program) {
     fprintf(stderr, "  --recluster-test      Test recluster behavior\n");
     fprintf(stderr, "  --benchmark           Measure push latency\n");
     fprintf(stderr, "  --json-stream         Output JSON events to stdout (for streaming viewer)\n");
+    fprintf(stderr, "  --verify-frames       Verify incremental frame accumulation correctness\n");
+    fprintf(stderr, "  --multi-recluster     Test push→recluster→push→recluster cycles\n");
+    fprintf(stderr, "  --zero-latency        Enable zero-latency mode (pre-fill 10s silence)\n");
     fprintf(stderr, "  -o, --output <path>   Output RTTM file\n");
     fprintf(stderr, "  --plda <path>         Path to PLDA binary file\n");
     fprintf(stderr, "  --coreml <path>       Path to CoreML embedding model\n");
@@ -178,6 +183,9 @@ int main(int argc, char** argv) {
     bool recluster_test = false;
     bool benchmark = false;
     bool json_stream = false;
+    bool verify_frames = false;
+    bool multi_recluster = false;
+    bool zero_latency = false;
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -196,6 +204,12 @@ int main(int argc, char** argv) {
             benchmark = true;
         } else if (arg == "--json-stream") {
             json_stream = true;
+        } else if (arg == "--verify-frames") {
+            verify_frames = true;
+        } else if (arg == "--multi-recluster") {
+            multi_recluster = true;
+        } else if (arg == "--zero-latency") {
+            zero_latency = true;
         } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
             output_path = argv[++i];
         } else if (arg == "--plda" && i + 1 < argc) {
@@ -213,11 +227,11 @@ int main(int argc, char** argv) {
         }
     }
     
-    // Create config
     StreamingConfig config;
     config.plda_path = plda_path;
     config.coreml_path = coreml_path;
     config.seg_coreml_path = seg_coreml_path;
+    config.zero_latency = zero_latency;
     
     // ========================================================================
     // Init-only test
@@ -236,16 +250,12 @@ int main(int argc, char** argv) {
         return 0;
     }
     
-    // ========================================================================
-    // Audio-based tests require a WAV file
-    // ========================================================================
     if (audio_path.empty()) {
         fprintf(stderr, "Error: audio file required for this test mode\n");
         print_usage(argv[0]);
         return 1;
     }
     
-    // Load audio
     std::vector<float> audio_samples;
     uint32_t sample_rate;
     if (!load_wav_file(audio_path, audio_samples, sample_rate)) {
@@ -261,15 +271,219 @@ int main(int argc, char** argv) {
     const double audio_duration = static_cast<double>(num_samples) / 16000.0;
     fprintf(stderr, "Audio: %.2fs, %d samples\n", audio_duration, num_samples);
     
-    // Initialize streaming
+    // ========================================================================
+    // Verify-frames mode
+    // ========================================================================
+    if (verify_frames) {
+        fprintf(stderr, "\n=== Frame Verification (%s mode) ===\n",
+                zero_latency ? "zero_latency" : "normal");
+        
+        StreamingState* vstate = streaming_init(config);
+        if (!vstate) {
+            fprintf(stderr, "FAILED: streaming_init returned nullptr\n");
+            return 1;
+        }
+
+        constexpr int STEP = 16000;
+        int pushes = 0;
+        int total_accumulated_frames = 0;
+        int expected_next_start = 0;
+        bool first_vad_received = false;
+        int first_vad_push = -1;
+        bool contiguity_ok = true;
+        bool size_ok = true;
+
+        for (int offset = 0; offset < num_samples; offset += STEP) {
+            int chunk_size = std::min(STEP, num_samples - offset);
+            auto vad_chunks = streaming_push(vstate, audio_samples.data() + offset, chunk_size);
+            pushes++;
+
+            for (const auto& vc : vad_chunks) {
+                if (!first_vad_received) {
+                    first_vad_received = true;
+                    first_vad_push = pushes;
+
+                    if (vc.start_frame != 0) {
+                        fprintf(stderr, "FAIL: first VADChunk start_frame=%d, expected 0\n",
+                                vc.start_frame);
+                        contiguity_ok = false;
+                    }
+                }
+
+                if (vc.start_frame != expected_next_start) {
+                    fprintf(stderr, "FAIL: chunk %d start_frame=%d, expected %d (gap=%d)\n",
+                            vc.chunk_index, vc.start_frame, expected_next_start,
+                            vc.start_frame - expected_next_start);
+                    contiguity_ok = false;
+                }
+
+                if (vc.num_frames != static_cast<int>(vc.vad.size())) {
+                    fprintf(stderr, "FAIL: chunk %d num_frames=%d but vad.size()=%zu\n",
+                            vc.chunk_index, vc.num_frames, vc.vad.size());
+                    size_ok = false;
+                }
+
+                if (!zero_latency && vc.chunk_index == 0) {
+                    if (vc.num_frames != 589) {
+                        fprintf(stderr, "FAIL: chunk 0 should have 589 frames, got %d\n",
+                                vc.num_frames);
+                        size_ok = false;
+                    }
+                } else {
+                    if (vc.num_frames < 58 || vc.num_frames > 61) {
+                        fprintf(stderr, "FAIL: chunk %d has %d frames (expected 59-60)\n",
+                                vc.chunk_index, vc.num_frames);
+                        size_ok = false;
+                    }
+                }
+
+                expected_next_start = vc.start_frame + vc.num_frames;
+                total_accumulated_frames += vc.num_frames;
+
+                fprintf(stderr, "  chunk=%d start_frame=%d num_frames=%d total=%d\n",
+                        vc.chunk_index, vc.start_frame, vc.num_frames,
+                        total_accumulated_frames);
+            }
+        }
+
+        fprintf(stderr, "\nResults:\n");
+        fprintf(stderr, "  Pushes: %d\n", pushes);
+        fprintf(stderr, "  Total accumulated frames: %d\n", total_accumulated_frames);
+        fprintf(stderr, "  First VAD at push: %d\n", first_vad_push);
+        fprintf(stderr, "  Contiguity: %s\n", contiguity_ok ? "OK" : "FAIL");
+        fprintf(stderr, "  Frame sizes: %s\n", size_ok ? "OK" : "FAIL");
+
+        if (zero_latency) {
+            if (first_vad_push != 1) {
+                fprintf(stderr, "FAIL: zero_latency should produce VAD on push 1, got %d\n",
+                        first_vad_push);
+                streaming_free(vstate);
+                return 1;
+            }
+            fprintf(stderr, "  Zero-latency immediate response: OK\n");
+        } else {
+            if (first_vad_push > 11) {
+                fprintf(stderr, "FAIL: normal mode should produce first VAD by push 10-11, got %d\n",
+                        first_vad_push);
+                streaming_free(vstate);
+                return 1;
+            }
+        }
+
+        streaming_free(vstate);
+
+        if (contiguity_ok && size_ok) {
+            fprintf(stderr, "\nPASSED: frame verification\n");
+            return 0;
+        } else {
+            fprintf(stderr, "\nFAILED: frame verification\n");
+            return 1;
+        }
+    }
+
+    // ========================================================================
+    // Multi-recluster test: push→recluster→push→recluster→finalize
+    // ========================================================================
+    if (multi_recluster) {
+        fprintf(stderr, "\n=== Multi-Recluster Test (%s mode) ===\n",
+                zero_latency ? "zero_latency" : "normal");
+
+        StreamingState* mrstate = streaming_init(config);
+        if (!mrstate) {
+            fprintf(stderr, "FAILED: streaming_init returned nullptr\n");
+            return 1;
+        }
+
+        constexpr int STEP = 16000;
+        int offset = 0;
+
+        // Phase 1: Push 15 seconds
+        fprintf(stderr, "Phase 1: Pushing 15s of audio...\n");
+        for (int i = 0; i < 15 && offset < num_samples; i++) {
+            int chunk_size = std::min(STEP, num_samples - offset);
+            streaming_push(mrstate, audio_samples.data() + offset, chunk_size);
+            offset += chunk_size;
+        }
+
+        // Recluster 1
+        fprintf(stderr, "Recluster 1...\n");
+        DiarizationResult r1 = streaming_recluster(mrstate);
+        fprintf(stderr, "  Recluster 1: %zu segments\n", r1.segments.size());
+        // Validate segments
+        for (const auto& seg : r1.segments) {
+            if (seg.start < 0 || seg.duration <= 0 || seg.speaker.empty()) {
+                fprintf(stderr, "FAIL: invalid segment after recluster 1\n");
+                streaming_free(mrstate);
+                return 1;
+            }
+        }
+
+        // Phase 2: Push 15 more seconds (THIS is where the old bug would crash/corrupt)
+        fprintf(stderr, "Phase 2: Pushing 15 more seconds...\n");
+        for (int i = 0; i < 15 && offset < num_samples; i++) {
+            int chunk_size = std::min(STEP, num_samples - offset);
+            auto vad = streaming_push(mrstate, audio_samples.data() + offset, chunk_size);
+            offset += chunk_size;
+            // Verify VAD chunks are still valid
+            for (const auto& vc : vad) {
+                if (vc.num_frames <= 0 || vc.num_frames > 589) {
+                    fprintf(stderr, "FAIL: invalid VAD chunk after recluster\n");
+                    streaming_free(mrstate);
+                    return 1;
+                }
+                if (static_cast<int>(vc.vad.size()) != vc.num_frames) {
+                    fprintf(stderr, "FAIL: vad size mismatch after recluster\n");
+                    streaming_free(mrstate);
+                    return 1;
+                }
+            }
+        }
+
+        // Recluster 2
+        fprintf(stderr, "Recluster 2...\n");
+        DiarizationResult r2 = streaming_recluster(mrstate);
+        fprintf(stderr, "  Recluster 2: %zu segments\n", r2.segments.size());
+        // Should have MORE or equal segments than r1 (more audio processed)
+        for (const auto& seg : r2.segments) {
+            if (seg.start < 0 || seg.duration <= 0 || seg.speaker.empty()) {
+                fprintf(stderr, "FAIL: invalid segment after recluster 2\n");
+                streaming_free(mrstate);
+                return 1;
+            }
+        }
+
+        // Finalize
+        fprintf(stderr, "Finalizing...\n");
+        DiarizationResult rfinal = streaming_finalize(mrstate);
+        fprintf(stderr, "  Finalize: %zu segments\n", rfinal.segments.size());
+        if (rfinal.segments.empty()) {
+            fprintf(stderr, "FAIL: finalize returned no segments\n");
+            streaming_free(mrstate);
+            return 1;
+        }
+        for (const auto& seg : rfinal.segments) {
+            if (seg.start < 0 || seg.duration <= 0 || seg.speaker.empty()) {
+                fprintf(stderr, "FAIL: invalid segment in finalize\n");
+                streaming_free(mrstate);
+                return 1;
+            }
+        }
+
+        streaming_free(mrstate);
+        fprintf(stderr, "\nPASSED: multi-recluster test\n");
+        return 0;
+    }
+
+    // ========================================================================
+    // Standard streaming test modes
+    // ========================================================================
     StreamingState* state = streaming_init(config);
     if (!state) {
         fprintf(stderr, "FAILED: streaming_init returned nullptr\n");
         return 1;
     }
     
-    // Push audio in 1-second chunks
-    constexpr int STEP_SAMPLES = 16000;  // 1 second at 16kHz
+    constexpr int STEP_SAMPLES = 16000;
     int chunks_pushed = 0;
     double total_push_time_ms = 0.0;
     

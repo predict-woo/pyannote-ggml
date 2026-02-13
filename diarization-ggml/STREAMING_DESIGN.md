@@ -34,7 +34,6 @@ struct StreamingState {
 
     // Current clustering result (updated every recluster)
     std::vector<float> centroids;       // [K × 256]
-    std::vector<int> global_labels;     // [N] global speaker for each embedding
     int num_speakers;
 
     // Bookkeeping
@@ -99,8 +98,7 @@ Trigger: chunks_processed - last_recluster_chunk >= 60
 │ 4. VBx refinement                   │
 │ 5. Compute new centroids            │
 │ 6. Reassign all embeddings          │
-│ 7. Update global_labels             │
-│ 8. Emit corrected segments          │
+│ 7. Emit corrected segments          │
 └─────────────────────────────────────┘
 ```
 

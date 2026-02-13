@@ -59,6 +59,10 @@ PyannoteModel::PyannoteModel(const Napi::CallbackInfo& info)
     if (env.IsExceptionPending()) return;
     config_.seg_coreml_path = getStringProp("segCoremlPath");
     if (env.IsExceptionPending()) return;
+
+    if (config.Has("zeroLatency") && config.Get("zeroLatency").IsBoolean()) {
+        config_.zero_latency = config.Get("zeroLatency").As<Napi::Boolean>().Value();
+    }
 }
 
 Napi::Value PyannoteModel::Diarize(const Napi::CallbackInfo& info) {

@@ -28,8 +28,7 @@ void PushWorker::OnOK() {
         Napi::Object obj = Napi::Object::New(env);
 
         obj.Set("chunkIndex", Napi::Number::New(env, chunk.chunk_index));
-        obj.Set("startTime", Napi::Number::New(env, chunk.start_time));
-        obj.Set("duration", Napi::Number::New(env, chunk.duration));
+        obj.Set("startFrame", Napi::Number::New(env, chunk.start_frame));
         obj.Set("numFrames", Napi::Number::New(env, chunk.num_frames));
 
         Napi::ArrayBuffer buf = Napi::ArrayBuffer::New(env, chunk.vad.size() * sizeof(float));

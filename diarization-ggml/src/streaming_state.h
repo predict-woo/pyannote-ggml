@@ -7,13 +7,12 @@ struct embedding_coreml_context;
 struct segmentation_coreml_context;
 
 struct StreamingConfig {
-    // Base configuration (model paths)
     std::string seg_model_path;
     std::string emb_model_path;
     std::string plda_path;
-    std::string coreml_path;       // embedding CoreML
-    std::string seg_coreml_path;   // segmentation CoreML
-    
+    std::string coreml_path;
+    std::string seg_coreml_path;
+    bool zero_latency = false;
 };
 
 struct StreamingState {
@@ -38,8 +37,6 @@ struct StreamingState {
     std::vector<int> centroid_counts;  // How many embeddings contributed to each centroid
     int num_provisional_speakers = 0;
     
-    // Global labels from last recluster
-    std::vector<int> global_labels;    // [N] global speaker for each embedding
     int num_speakers = 0;
     
     // Bookkeeping
@@ -47,7 +44,8 @@ struct StreamingState {
     int last_recluster_chunk = 0;
     double audio_time_processed = 0.0;
     bool finalized = false;
-    int samples_trimmed = 0;  // absolute sample offset trimmed from audio_buffer front
+    int samples_trimmed = 0;
+    int silence_frames_offset = 0;
     
     // Model contexts (owned, freed in streaming_free)
     struct segmentation_coreml_context* seg_coreml_ctx = nullptr;

@@ -14,6 +14,7 @@ typedef struct {
     const char* plda_path;
     const char* coreml_path;
     const char* seg_coreml_path;
+    int zero_latency;
 } streaming_config_t;
 
 typedef struct {
@@ -24,10 +25,9 @@ typedef struct {
 
 typedef struct {
     int chunk_index;
-    double start_time;
-    double duration;
+    int start_frame;
     int num_frames;
-    float* vad;     // [num_frames] combined speaker activity (caller must free via streaming_free_vad_chunks_c)
+    float* vad;
 } streaming_vad_chunk_t;
 
 // API

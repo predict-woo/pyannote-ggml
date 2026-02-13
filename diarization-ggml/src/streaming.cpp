@@ -29,6 +29,12 @@ static constexpr int NUM_POWERSET_CLASSES    = 7;
 static constexpr int NUM_LOCAL_SPEAKERS      = 3;
 static constexpr int EMBEDDING_DIM           = 256;
 static constexpr int FBANK_NUM_BINS          = 80;
+static constexpr double FRAME_STEP_SEC       = 0.016875;
+
+static int chunk_global_start_frame(int chunk_idx) {
+    return static_cast<int>(std::lround(
+        static_cast<double>(chunk_idx) * 1.0 / FRAME_STEP_SEC));
+}
 
 // Process a single chunk at state->chunks_processed. The chunk audio is cropped
 // from audio_buffer with zero-padding if it extends past total_samples.
@@ -209,7 +215,6 @@ StreamingState* streaming_init(const StreamingConfig& config) {
         }
     }
     
-    // Initialize bookkeeping
     state->chunks_processed = 0;
     state->last_recluster_chunk = 0;
     state->audio_time_processed = 0.0;
@@ -217,7 +222,24 @@ StreamingState* streaming_init(const StreamingConfig& config) {
     state->num_speakers = 0;
     state->num_provisional_speakers = 0;
     state->samples_trimmed = 0;
-    
+    state->silence_frames_offset = 0;
+
+    if (config.zero_latency) {
+        state->audio_buffer.resize(CHUNK_SAMPLES, 0.0f);
+        if (!process_one_chunk(state, CHUNK_SAMPLES)) {
+            fprintf(stderr, "Error: failed to process silence chunk in zero_latency mode\n");
+#ifdef EMBEDDING_USE_COREML
+            if (state->emb_coreml_ctx) embedding_coreml_free(state->emb_coreml_ctx);
+#endif
+#ifdef SEGMENTATION_USE_COREML
+            if (state->seg_coreml_ctx) segmentation_coreml_free(state->seg_coreml_ctx);
+#endif
+            delete state;
+            return nullptr;
+        }
+        state->silence_frames_offset = FRAMES_PER_CHUNK;
+    }
+
     return state;
 }
 
@@ -254,20 +276,44 @@ std::vector<VADChunk> streaming_push(
             break;
         }
         
+        int new_start_frame;
+        int new_frame_count;
+
+        if (chunk_idx_before == 0) {
+            new_start_frame = 0;
+            new_frame_count = FRAMES_PER_CHUNK;
+        } else {
+            int prev_global_start = chunk_global_start_frame(chunk_idx_before - 1);
+            int cur_global_start = chunk_global_start_frame(chunk_idx_before);
+            new_frame_count = cur_global_start - prev_global_start;
+            new_start_frame = prev_global_start + FRAMES_PER_CHUNK;
+        }
+
+        if (state->config.zero_latency && chunk_idx_before == 0) {
+            total_abs_samples = static_cast<int>(state->audio_buffer.size()) + state->samples_trimmed;
+            samples_needed_for_next_chunk =
+                state->chunks_processed * STEP_SAMPLES + CHUNK_SAMPLES;
+            continue;
+        }
+
+        if (state->config.zero_latency) {
+            new_start_frame -= state->silence_frames_offset;
+        }
+
         const float* chunk_binarized = state->binarized.data() +
             static_cast<size_t>(chunk_idx_before) * FRAMES_PER_CHUNK * NUM_LOCAL_SPEAKERS;
-        
+
         VADChunk vad_chunk;
         vad_chunk.chunk_index = chunk_idx_before;
-        vad_chunk.start_time = static_cast<double>(chunk_idx_before) *
-            (static_cast<double>(STEP_SAMPLES) / static_cast<double>(SAMPLE_RATE));
-        vad_chunk.duration = 10.0;
-        vad_chunk.num_frames = FRAMES_PER_CHUNK;
-        vad_chunk.vad.resize(FRAMES_PER_CHUNK);
-        for (int f = 0; f < FRAMES_PER_CHUNK; f++) {
+        vad_chunk.start_frame = new_start_frame;
+        vad_chunk.num_frames = new_frame_count;
+        vad_chunk.vad.resize(new_frame_count);
+
+        int frame_offset = FRAMES_PER_CHUNK - new_frame_count;
+        for (int f = 0; f < new_frame_count; f++) {
             float any_active = 0.0f;
             for (int s = 0; s < NUM_LOCAL_SPEAKERS; s++) {
-                if (chunk_binarized[f * NUM_LOCAL_SPEAKERS + s] != 0.0f) {
+                if (chunk_binarized[(frame_offset + f) * NUM_LOCAL_SPEAKERS + s] != 0.0f) {
                     any_active = 1.0f;
                     break;
                 }
@@ -309,7 +355,6 @@ DiarizationResult streaming_recluster(StreamingState* state) {
     const int num_filtered = static_cast<int>(filt_chunk_idx.size());
     
     if (num_filtered < 2) {
-        state->global_labels.assign(static_cast<size_t>(num_filtered), 0);
         state->num_speakers = (num_filtered > 0) ? 1 : 0;
         state->last_recluster_chunk = state->chunks_processed;
         return {};
@@ -380,12 +425,11 @@ DiarizationResult streaming_recluster(StreamingState* state) {
             ahc_clusters.data(), num_filtered, num_ahc_clusters,
             plda_features.data(), PLDA_DIM,
             state->plda.plda_psi.data(), VBX_FA, VBX_FB, VBX_MAX_ITERS,
-            vbx_result)) {
-        state->global_labels.assign(static_cast<size_t>(num_filtered), 0);
-        state->num_speakers = 1;
-        state->last_recluster_chunk = state->chunks_processed;
-        return {};
-    }
+     vbx_result)) {
+         state->num_speakers = 1;
+         state->last_recluster_chunk = state->chunks_processed;
+         return {};
+     }
     
     // Step 6: Compute centroids from VBx soft assignments
     const int vbx_S = vbx_result.num_speakers;
@@ -460,18 +504,10 @@ DiarizationResult streaming_recluster(StreamingState* state) {
                 hard_clusters[c * NUM_LOCAL_SPEAKERS + s] = -2;
             }
         }
-    }
-    
-    state->global_labels.resize(static_cast<size_t>(num_filtered));
-    for (int i = 0; i < num_filtered; i++) {
-        const int c = filt_chunk_idx[i];
-        const int s = filt_speaker_idx[i];
-        state->global_labels[i] = hard_clusters[c * NUM_LOCAL_SPEAKERS + s];
-    }
-    
-    state->chunk_idx = std::move(filt_chunk_idx);
-    state->local_speaker_idx = std::move(filt_speaker_idx);
-    state->embeddings = std::move(filtered_emb);
+     }
+     
+     // Keep state->embeddings/chunk_idx/local_speaker_idx unfiltered (3 per chunk)
+    // so subsequent push() calls can safely append to them.
     
     state->num_speakers = num_clusters;
     state->centroids = std::move(centroids);
@@ -580,6 +616,23 @@ DiarizationResult streaming_recluster(StreamingState* state) {
                   return a.start < b.start;
               });
     
+    // Zero-latency: subtract silence pre-fill (10s) so real audio starts at t=0
+    if (state->config.zero_latency) {
+        const double silence_duration = static_cast<double>(CHUNK_SAMPLES) / static_cast<double>(SAMPLE_RATE);
+        std::vector<DiarizationResult::Segment> adjusted;
+        adjusted.reserve(result.segments.size());
+        for (auto& seg : result.segments) {
+            seg.start -= silence_duration;
+            if (seg.start + seg.duration <= 0.0) continue;
+            if (seg.start < 0.0) {
+                seg.duration += seg.start;
+                seg.start = 0.0;
+            }
+            adjusted.push_back(std::move(seg));
+        }
+        result.segments = std::move(adjusted);
+    }
+    
     return result;
 }
 
@@ -625,14 +678,13 @@ void streaming_free(StreamingState* state) {
 #endif
     
     // Clear all vectors (automatic with delete, but explicit for clarity)
-    state->audio_buffer.clear();
-    state->embeddings.clear();
-    state->chunk_idx.clear();
-    state->local_speaker_idx.clear();
-    state->binarized.clear();
-    state->centroids.clear();
-    state->centroid_counts.clear();
-    state->global_labels.clear();
-    
-    delete state;
+     state->audio_buffer.clear();
+     state->embeddings.clear();
+     state->chunk_idx.clear();
+     state->local_speaker_idx.clear();
+     state->binarized.clear();
+     state->centroids.clear();
+     state->centroid_counts.clear();
+     
+     delete state;
 }
