@@ -56,3 +56,12 @@
 - VAD model is optional in PipelineConfig — passing nullptr falls back to zero-detection mode in silence_filter (non-zero = speech).
 - Pipeline init uses cascading cleanup on failure: each stage's init failure frees all previously initialized stages.
 - `buffer_start_time` tracks the filtered-timeline timestamp of the first sample in AudioBuffer after dequeue, computed as `dequeued_frames / 16000.0`.
+
+## Task 8: Transcribe CLI
+
+- Added `src/main_transcribe.cpp` as pipeline wrapper CLI with one positional `<audio.wav>` and named model/options (`--seg-model`, `--emb-model`, `--whisper-model`, `--plda`, `--seg-coreml`, `--emb-coreml`, `--vad-model`, `--language`, `--output`).
+- Reused the same WAV loading pattern from `tests/test_pipeline.cpp` (PCM/mono/16-bit validation + data chunk scan), with a strict `.wav` input check.
+- Pipeline callback currently provides cumulative `AlignedSegment` state; CLI callback should replace stored output each invocation (`ctx->segments = segments`) rather than append.
+- JSON output can be emitted directly without external libs; escaping `\\` and `"` is sufficient for this pipeline output, with optional newline/tab escaping for safety.
+- `transcribe` target must compile `pipeline.cpp`, `silence_filter.cpp`, `audio_buffer.cpp`, `segment_detector.cpp`, `transcriber.cpp`, and `aligner.cpp` directly (same pattern as `test_pipeline`) and link `transcription-lib`.
+- Verified command shape: `./build/bin/transcribe --help` prints usage; sample run on `../samples/sample.wav` emits JSON `segments[]` with `speaker/start/duration/words[]` and stderr timing (`total/audio/rtf`).

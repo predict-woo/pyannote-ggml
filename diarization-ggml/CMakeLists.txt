@@ -116,9 +116,23 @@ set_target_properties(test_aligner PROPERTIES
 add_library(transcription-lib INTERFACE)
 target_link_libraries(transcription-lib INTERFACE diarization-lib whisper)
 
-# Transcription CLI (placeholder — main_transcribe.cpp will be added in Task 8)
-# add_executable(transcribe src/main_transcribe.cpp)
-# target_link_libraries(transcribe PRIVATE transcription-lib)
+add_executable(transcribe
+    src/main_transcribe.cpp
+    src/pipeline.cpp
+    src/silence_filter.cpp
+    src/audio_buffer.cpp
+    src/segment_detector.cpp
+    src/transcriber.cpp
+    src/aligner.cpp
+)
+target_link_libraries(transcribe PRIVATE transcription-lib)
+target_include_directories(transcribe PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+set_target_properties(transcribe PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
 
 # Integration test targets (sources added by later tasks)
 add_executable(test_silence_filter tests/test_silence_filter.cpp src/silence_filter.cpp)
