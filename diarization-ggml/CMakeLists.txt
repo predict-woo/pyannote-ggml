@@ -5,9 +5,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(EMBEDDING_COREML "Enable CoreML acceleration" OFF)
 option(SEGMENTATION_COREML "Enable CoreML acceleration for segmentation" OFF)
+option(WHISPER_COREML "Enable CoreML for Whisper transcription" OFF)
 option(DIARIZATION_STATIC "Build all dependencies as static libraries" OFF)
 
-# Add GGML (guarded — may already be added by sub-projects)
+# Whisper.cpp integration (adds ggml as part of its build, so ggml guard below will skip)
+if(NOT TARGET whisper)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+    add_subdirectory(../whisper.cpp ${CMAKE_CURRENT_BINARY_DIR}/whisper.cpp)
+endif()
+
+# Add GGML (guarded — skipped when whisper.cpp already provides it)
 if(NOT TARGET ggml)
     if(DIARIZATION_STATIC)
         set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -85,5 +95,17 @@ target_link_libraries(streaming_test PRIVATE diarization-lib)
 set_target_properties(streaming_test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+# Transcription library (combines diarization + whisper)
+add_library(transcription-lib INTERFACE)
+target_link_libraries(transcription-lib INTERFACE diarization-lib whisper)
+
+# Transcription CLI (placeholder — main_transcribe.cpp will be added in Task 8)
+# add_executable(transcribe src/main_transcribe.cpp)
+# target_link_libraries(transcribe PRIVATE transcription-lib)
+
+# Integration test targets (sources added by later tasks)
+# add_executable(test_silence_filter tests/test_silence_filter.cpp)
+# add_executable(test_audio_buffer tests/test_audio_buffer.cpp)
 
 message(STATUS "diarization-ggml project configured successfully")
