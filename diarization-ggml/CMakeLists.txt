@@ -96,6 +96,12 @@ set_target_properties(streaming_test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+add_executable(test_segment_detector tests/test_segment_detector.cpp src/segment_detector.cpp)
+target_link_libraries(test_segment_detector PRIVATE diarization-lib)
+set_target_properties(test_segment_detector PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
 # Transcription library (combines diarization + whisper)
 add_library(transcription-lib INTERFACE)
 target_link_libraries(transcription-lib INTERFACE diarization-lib whisper)
