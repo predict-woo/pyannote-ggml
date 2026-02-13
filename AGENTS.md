@@ -232,8 +232,8 @@ CoreML may output F16 even when configured for F32 compute. The bridge code hand
 ### 4. Segmentation model input
 The segmentation model expects raw waveform `(1, 1, 160000)` for CoreML, but `(160000, 1, 1)` for GGML (column-major). The transpose happens in the bridge.
 
-### 5. Streaming recluster mutates state
-After `streaming_recluster`, lines 472-474 overwrite `state->chunk_idx`, `state->local_speaker_idx`, and `state->embeddings` with filtered versions. This means the original unfiltered data (with the chunk×3 layout) is lost. Calling push→recluster→push→recluster may produce incorrect results because the second push appends to already-filtered embeddings. Use recluster sparingly (e.g., only at fixed intervals) or only at finalize.
+### 5. Streaming recluster mutates state (FIXED)
+Previously, `streaming_recluster` overwrote `state->chunk_idx`, `state->local_speaker_idx`, and `state->embeddings` with filtered versions, making push→recluster→push→recluster cycles unsafe. This has been **fixed**: recluster now uses local variables for filtering and keeps `state->embeddings`, `state->chunk_idx`, and `state->local_speaker_idx` unfiltered (3 entries per chunk) so subsequent `push()` calls can safely append to them. Push→recluster→push→recluster cycles now work correctly.
 
 ### 6. Streaming requires CoreML
 The streaming code has no GGML-only fallback. Both segmentation and embedding `#else` branches print errors and return false/continue. Any streaming work must be compiled with `-DEMBEDDING_COREML=ON -DSEGMENTATION_COREML=ON`.

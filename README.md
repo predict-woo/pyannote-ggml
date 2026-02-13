@@ -246,7 +246,7 @@ cd diarization-ggml
 ### Limitations
 
 - Currently requires CoreML (no GGML-only fallback for streaming)
-- `streaming_recluster` overwrites internal state (`chunk_idx`, `local_speaker_idx`, `embeddings` replaced with filtered versions), so push→recluster→push→recluster cycles may not work correctly. Use recluster sparingly, or only at finalize.
+- Push→recluster→push→recluster cycles work correctly. Recluster uses local variables for filtering and preserves the unfiltered state for subsequent pushes.
 
 ## Testing
 
