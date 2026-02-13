@@ -23,6 +23,9 @@ cmake-build-*/
 *~
 .vim
 
+# Language server caches
+.cache/
+
 # Python
 __pycache__/
 *.py[cod]

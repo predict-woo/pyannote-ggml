@@ -77,3 +77,11 @@
 
 - Added README section `Transcription + Diarization` between `Streaming API` and `Testing` with build flags (`-DEMBEDDING_COREML=ON -DSEGMENTATION_COREML=ON -DWHISPER_COREML=ON`), model requirements, verified CLI shape from `main_transcribe.cpp`, JSON output example, C++ `pipeline.h` callback snippet, and 7-stage architecture summary.
 - Added AGENTS section `Integration Pipeline` after `Streaming Architecture`, including 7 stages (referencing `INTEGRATION_PLAN.md`), key integration files, integrated build command, unit+integration test commands, and constants from `pipeline.cpp` (`MIN_SEGMENT_DURATION`, `MAX_WHISPER_SAMPLES`, `SAMPLE_RATE`).
+
+## Final Acceptance Criteria Sweep
+
+- All 11 tasks completed and committed (f679246 through ac14b03).
+- 66/72 acceptance criteria checkboxes marked as verified.
+- 6 remaining checkboxes all relate to Python DER/accuracy regression tests that require `.venv` with `pyannote.core`/`pyannote.metrics`. The `.venv` is broken (Python 3.10 dylib missing). This is a pre-existing issue documented since Task 1.
+- The diarization pipeline was verified working during Task 1 (2 speakers, 13 segments, correct output). No code changes were made to the existing diarization path — all integration work is additive (new source files + new CMake targets).
+- To resolve the remaining 6 checkboxes: recreate `.venv` with system Python 3.11 and reinstall `pyannote.audio`.

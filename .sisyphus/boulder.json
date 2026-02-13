@@ -1,9 +1,6 @@
 {
-  "active_plan": "/Users/andyye/dev/pyannote-audio/.sisyphus/plans/node-bindings.md",
-  "started_at": "2026-02-11T10:12:47.828Z",
-  "session_ids": [
-    "ses_3b3e77dfdffeLS53CkPGVWLnLY",
-    "ses_3b47ceb8bffeGYFCL1Ac726btq"
-  ],
-  "plan_name": "node-bindings"
+  "active_plan": "/Users/andyye/dev/whisper-diarization.cpp/pyannote.cpp/.sisyphus/plans/whisper-diarization-integration.md",
+  "started_at": "2026-02-13T12:26:19.613Z",
+  "session_ids": ["ses_3a9292d0effe0rtp0luROwTeO1"],
+  "plan_name": "whisper-diarization-integration"
 }

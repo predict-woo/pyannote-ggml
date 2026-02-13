@@ -120,7 +120,7 @@ def main():
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
 
-    audio_path = project_root.parent / "samples" / "sample.wav"
+    audio_path = project_root.parent.parent / "samples" / "sample.wav"
     model_path = project_root / "segmentation.gguf"
     executable_path = project_root / "build" / "bin" / "segmentation-ggml"
     output_path = script_dir / "ggml_accuracy_output.bin"
