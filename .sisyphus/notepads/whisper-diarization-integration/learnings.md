@@ -65,3 +65,10 @@
 - JSON output can be emitted directly without external libs; escaping `\\` and `"` is sufficient for this pipeline output, with optional newline/tab escaping for safety.
 - `transcribe` target must compile `pipeline.cpp`, `silence_filter.cpp`, `audio_buffer.cpp`, `segment_detector.cpp`, `transcriber.cpp`, and `aligner.cpp` directly (same pattern as `test_pipeline`) and link `transcription-lib`.
 - Verified command shape: `./build/bin/transcribe --help` prints usage; sample run on `../samples/sample.wav` emits JSON `segments[]` with `speaker/start/duration/words[]` and stderr timing (`total/audio/rtf`).
+
+## Task 9: Integration Test Script
+
+- Added `diarization-ggml/tests/test_integration.py` as a stdlib-only executable integration script with argparse model-path inputs (or env fallback: `SEG_MODEL`, `EMB_MODEL`, `WHISPER_MODEL`, `PLDA`, optional CoreML/VAD/reference vars).
+- Script runs `build/bin/transcribe` end-to-end, parses stdout JSON, validates segment/word schema, speaker cardinality (>=2), timestamp ordering/non-negativity, segment ordering, and total word count (>=10), then prints `N/M checks passed` and returns non-zero on any failed check.
+- Diarization regression is implemented as optional and skipped cleanly when `--reference-rttm` is not provided or required artifacts are missing; when enabled, it runs `build/bin/diarization-ggml` then `tests/compare_rttm.py --threshold 1.0`.
+- Local run used: `python3 tests/test_integration.py --build-dir build --seg-model ../models/segmentation-ggml/segmentation.gguf --emb-model ../models/embedding-ggml/embedding.gguf --whisper-model ../whisper.cpp/models/ggml-base.en.bin --plda plda.gguf`; it failed in this environment during pipeline init (`no segmentation model available`), indicating this build expects additional segmentation runtime assets (likely CoreML path).
