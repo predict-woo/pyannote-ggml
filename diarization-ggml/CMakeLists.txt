@@ -121,7 +121,11 @@ target_link_libraries(transcription-lib INTERFACE diarization-lib whisper)
 # target_link_libraries(transcribe PRIVATE transcription-lib)
 
 # Integration test targets (sources added by later tasks)
-# add_executable(test_silence_filter tests/test_silence_filter.cpp src/silence_filter.cpp)
+add_executable(test_silence_filter tests/test_silence_filter.cpp src/silence_filter.cpp)
+target_link_libraries(test_silence_filter PRIVATE transcription-lib)
+set_target_properties(test_silence_filter PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
 add_executable(test_audio_buffer tests/test_audio_buffer.cpp src/audio_buffer.cpp)
 target_include_directories(test_audio_buffer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set_target_properties(test_audio_buffer PROPERTIES
