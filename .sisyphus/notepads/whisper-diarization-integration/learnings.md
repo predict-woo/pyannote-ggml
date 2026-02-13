@@ -85,3 +85,10 @@
 - 6 remaining checkboxes all relate to Python DER/accuracy regression tests that require `.venv` with `pyannote.core`/`pyannote.metrics`. The `.venv` is broken (Python 3.10 dylib missing). This is a pre-existing issue documented since Task 1.
 - The diarization pipeline was verified working during Task 1 (2 speakers, 13 segments, correct output). No code changes were made to the existing diarization path — all integration work is additive (new source files + new CMake targets).
 - To resolve the remaining 6 checkboxes: recreate `.venv` with system Python 3.11 and reinstall `pyannote.audio`.
+
+## Task 11: CLI RTTM + Realtime + Logging Noise Reduction
+
+- Added `--rttm <path>` to `src/main_transcribe.cpp`, writing one RTTM line per `AlignedSegment` using file id = input WAV basename without extension.
+- Added `--realtime` flag to `src/main_transcribe.cpp`; push loop now sleeps 1000ms after each 1s `pipeline_push`, and progress interval switches to 1s (`realtime`) vs 5s (default).
+- Reduced high-frequency pipeline noise in `src/pipeline.cpp` by removing per-push logs for silence filter output and VAD chunk count while keeping segment-end, submit, whisper-result, recluster, align, and all finalize logs.
+- Verified compile success with `cmake --build build` in `diarization-ggml/` after these edits.
