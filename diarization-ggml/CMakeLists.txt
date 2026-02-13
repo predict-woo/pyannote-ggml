@@ -139,4 +139,22 @@ set_target_properties(test_transcriber PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+add_executable(test_pipeline
+    tests/test_pipeline.cpp
+    src/pipeline.cpp
+    src/silence_filter.cpp
+    src/audio_buffer.cpp
+    src/segment_detector.cpp
+    src/transcriber.cpp
+    src/aligner.cpp
+)
+target_link_libraries(test_pipeline PRIVATE transcription-lib)
+target_include_directories(test_pipeline PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+set_target_properties(test_pipeline PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
 message(STATUS "diarization-ggml project configured successfully")

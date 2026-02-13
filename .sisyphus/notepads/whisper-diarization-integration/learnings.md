@@ -46,3 +46,13 @@
 - 30s hard cap truncates at `30 * 16000 = 480000` samples. <1s audio skipped with empty valid result.
 - Test with `ggml-base.en.bin` on `sample.wav` (30s) produces 109 tokens — well above the ≥10 threshold.
 - `transcription-lib` INTERFACE library provides both diarization-lib and whisper link dependencies.
+
+## Task 7: Pipeline Orchestrator
+
+- Pipeline wires 6 stages: SilenceFilter → AudioBuffer → pyannote streaming → SegmentDetector → Transcriber → Aligner.
+- `pipeline_push` is non-blocking for Whisper results (`transcriber_try_get_result`); only `pipeline_finalize` uses `transcriber_wait_result`.
+- On 30s sample.wav (2-speaker conversation): produces 2 callbacks, 9 aligned segments, 110 words, 2 speakers (SPEAKER_00/SPEAKER_01).
+- Whisper can produce zero-duration tokens (start == end) for punctuation and short words — test uses `start > end` check instead of `start >= end`.
+- VAD model is optional in PipelineConfig — passing nullptr falls back to zero-detection mode in silence_filter (non-zero = speech).
+- Pipeline init uses cascading cleanup on failure: each stage's init failure frees all previously initialized stages.
+- `buffer_start_time` tracks the filtered-timeline timestamp of the first sample in AudioBuffer after dequeue, computed as `dequeued_frames / 16000.0`.
