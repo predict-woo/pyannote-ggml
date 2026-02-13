@@ -72,3 +72,8 @@
 - Script runs `build/bin/transcribe` end-to-end, parses stdout JSON, validates segment/word schema, speaker cardinality (>=2), timestamp ordering/non-negativity, segment ordering, and total word count (>=10), then prints `N/M checks passed` and returns non-zero on any failed check.
 - Diarization regression is implemented as optional and skipped cleanly when `--reference-rttm` is not provided or required artifacts are missing; when enabled, it runs `build/bin/diarization-ggml` then `tests/compare_rttm.py --threshold 1.0`.
 - Local run used: `python3 tests/test_integration.py --build-dir build --seg-model ../models/segmentation-ggml/segmentation.gguf --emb-model ../models/embedding-ggml/embedding.gguf --whisper-model ../whisper.cpp/models/ggml-base.en.bin --plda plda.gguf`; it failed in this environment during pipeline init (`no segmentation model available`), indicating this build expects additional segmentation runtime assets (likely CoreML path).
+
+## Task 10: Documentation Update
+
+- Added README section `Transcription + Diarization` between `Streaming API` and `Testing` with build flags (`-DEMBEDDING_COREML=ON -DSEGMENTATION_COREML=ON -DWHISPER_COREML=ON`), model requirements, verified CLI shape from `main_transcribe.cpp`, JSON output example, C++ `pipeline.h` callback snippet, and 7-stage architecture summary.
+- Added AGENTS section `Integration Pipeline` after `Streaming Architecture`, including 7 stages (referencing `INTEGRATION_PLAN.md`), key integration files, integrated build command, unit+integration test commands, and constants from `pipeline.cpp` (`MIN_SEGMENT_DURATION`, `MAX_WHISPER_SAMPLES`, `SAMPLE_RATE`).

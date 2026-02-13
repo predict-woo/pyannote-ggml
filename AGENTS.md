@@ -218,6 +218,60 @@ Reconstruction constants (inside `streaming_recluster`):
 | FRAME_DURATION | 0.0619375s |
 | FRAME_STEP | 0.016875s |
 
+### Integration Pipeline
+The transcription+diarization path is a 7-stage streaming pipeline (see `INTEGRATION_PLAN.md` for full behavior and edge cases):
+1. **VAD Silence Filter** - compresses long silence to <=2s while preserving transitions.
+2. **Audio Buffer** - FIFO filtered-audio store with absolute frame accounting.
+3. **Segmentation** - pyannote streaming VAD drives segment-end detection.
+4. **Transcription** - Whisper worker transcribes buffered audio (20s minimum trigger, ~30s cap).
+5. **Alignment** - WhisperX-style word-to-speaker assignment by maximum overlap.
+6. **Finalize** - flushes all stages and runs final recluster + alignment.
+7. **Callback** - emits incremental speaker-labeled word segments.
+
+**Key files**:
+- `pipeline.h` / `pipeline.cpp`
+- `silence_filter.h` / `silence_filter.cpp`
+- `audio_buffer.h` / `audio_buffer.cpp`
+- `segment_detector.h` / `segment_detector.cpp`
+- `transcriber.h` / `transcriber.cpp`
+- `aligner.h` / `aligner.cpp`
+- `main_transcribe.cpp`
+
+**Build command (integrated pipeline)**:
+```bash
+cd diarization-ggml
+cmake -B build -DEMBEDDING_COREML=ON -DSEGMENTATION_COREML=ON -DWHISPER_COREML=ON
+cmake --build build
+```
+
+**Test commands**:
+```bash
+# Unit tests
+cd diarization-ggml
+./build/bin/test_silence_filter
+./build/bin/test_audio_buffer
+./build/bin/test_segment_detector
+./build/bin/test_transcriber
+./build/bin/test_aligner
+./build/bin/test_pipeline
+
+# Integration test
+python3 tests/test_integration.py \
+  --build-dir build \
+  --seg-model ../models/segmentation-ggml/segmentation.gguf \
+  --emb-model ../models/embedding-ggml/embedding.gguf \
+  --whisper-model ../whisper.cpp/models/ggml-base.en.bin \
+  --plda plda.gguf
+```
+
+**Integration constants** (`pipeline.cpp`):
+
+| Constant | Value |
+|---|---|
+| MIN_SEGMENT_DURATION | 20s |
+| MAX_WHISPER_SAMPLES | 30s (480000 samples) |
+| SAMPLE_RATE | 16000 |
+
 ## Common Pitfalls
 
 ### 1. Per-element accuracy ≠ Pipeline accuracy

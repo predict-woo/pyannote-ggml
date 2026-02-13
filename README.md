@@ -248,6 +248,98 @@ cd diarization-ggml
 - Currently requires CoreML (no GGML-only fallback for streaming)
 - Push→recluster→push→recluster cycles work correctly. Recluster uses local variables for filtering and preserves the unfiltered state for subsequent pushes.
 
+## Transcription + Diarization
+
+This integrated pipeline combines pyannote streaming diarization with Whisper transcription to produce speaker-labeled, word-level transcripts in real time.
+
+### Build Instructions
+
+```bash
+cd diarization-ggml
+cmake -B build -DEMBEDDING_COREML=ON -DSEGMENTATION_COREML=ON -DWHISPER_COREML=ON
+cmake --build build
+```
+
+### Model Requirements
+
+- Segmentation GGUF model (`segmentation.gguf`)
+- Embedding GGUF model (`embedding.gguf`)
+- PLDA model (`plda.gguf`)
+- Whisper GGUF model (for example `ggml-large-v3-turbo.bin` or `ggml-base.en.bin`)
+- CoreML models: segmentation `.mlpackage`, embedding `.mlpackage`
+- Optional: Silero VAD model (`ggml-silero-v6.2.0.bin`)
+
+### CLI Usage
+
+```bash
+./build/bin/transcribe ../samples/sample.wav \
+  --seg-model ../models/segmentation-ggml/segmentation.gguf \
+  --emb-model ../models/embedding-ggml/embedding.gguf \
+  --whisper-model path/to/ggml-large-v3-turbo.bin \
+  --plda plda.gguf \
+  --seg-coreml ../models/segmentation-ggml/segmentation.mlpackage \
+  --emb-coreml ../models/embedding-ggml/embedding.mlpackage \
+  --language en
+```
+
+### JSON Output Format
+
+```json
+{
+  "segments": [
+    {
+      "speaker": "SPEAKER_00",
+      "start": 0.5,
+      "duration": 2.1,
+      "words": [
+        {"text": "Hello", "start": 0.5, "end": 0.8},
+        {"text": "world", "start": 0.9, "end": 1.2}
+      ]
+    }
+  ]
+}
+```
+
+### C++ API Usage Example
+
+```cpp
+#include "pipeline.h"
+
+void on_result(const std::vector<AlignedSegment>& segments, void* user_data) {
+    for (const auto& seg : segments) {
+        printf("[%s] %.2f-%.2f:", seg.speaker.c_str(), seg.start, seg.start + seg.duration);
+        for (const auto& w : seg.words) printf(" %s", w.text.c_str());
+        printf("\n");
+    }
+}
+
+PipelineConfig config{};
+config.diarization.seg_model_path = "segmentation.gguf";
+config.diarization.emb_model_path = "embedding.gguf";
+config.diarization.plda_path = "plda.gguf";
+config.diarization.seg_coreml_path = "segmentation.mlpackage";
+config.diarization.coreml_path = "embedding.mlpackage";
+config.transcriber.whisper_model_path = "ggml-large-v3-turbo.bin";
+config.transcriber.language = "en";
+config.vad_model_path = nullptr;
+
+PipelineState* state = pipeline_init(config, on_result, nullptr);
+// Push audio in 1-second chunks
+pipeline_push(state, samples, 16000);
+pipeline_finalize(state);
+pipeline_free(state);
+```
+
+### Pipeline Architecture
+
+1. **VAD Silence Filter**: Compresses long silence gaps to at most 2 seconds while preserving smooth speech transitions.
+2. **Audio Buffer**: Maintains a FIFO of filtered audio with absolute frame tracking for timestamp-safe dequeue/range reads.
+3. **Segmentation**: Uses pyannote streaming VAD to detect speech-to-silence boundaries and produce segment end timestamps.
+4. **Transcription**: Sends buffered audio to Whisper (20s minimum, ~30s cap) on a worker thread and returns word timestamps.
+5. **Alignment**: Assigns each Whisper word to a diarized speaker via maximum overlap (WhisperX-style word-speaker matching).
+6. **Finalize**: Flushes silence filter, pyannote, and Whisper, then runs final recluster and alignment at end of stream.
+7. **Callback**: Emits incremental speaker-labeled word output after each alignment update.
+
 ## Testing
 
 ```bash
