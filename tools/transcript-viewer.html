@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transcript Viewer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f5f5f7;
+            color: #1d1d1f;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 24px;
+            color: #1d1d1f;
+            font-weight: 600;
+            font-size: 28px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .file-inputs {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .file-input-group {
+            flex: 1;
+            min-width: 250px;
+        }
+
+        .file-input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #1d1d1f;
+        }
+
+        .file-input-group input[type="file"] {
+            width: 100%;
+            padding: 14px;
+            background: #fff;
+            border: 2px dashed #86868b;
+            border-radius: 12px;
+            color: #1d1d1f;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            font-size: 14px;
+        }
+
+        .file-input-group input[type="file"]:hover {
+            border-color: #0071e3;
+            background: #f0f7ff;
+        }
+
+        .player-section,
+        .diarization-view,
+        .transcript-view,
+        .keyboard-shortcuts {
+            background: #fff;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .play-btn {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            border: none;
+            background: #0071e3;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s, transform 0.1s;
+            box-shadow: 0 4px 12px rgba(0,113,227,0.3);
+        }
+
+        .play-btn:hover {
+            background: #0077ed;
+            transform: scale(1.05);
+        }
+
+        .play-btn:active {
+            transform: scale(0.98);
+        }
+
+        .play-btn:disabled {
+            background: #d2d2d7;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .time-display {
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 16px;
+            color: #1d1d1f;
+            font-weight: 500;
+            min-width: 140px;
+        }
+
+        .current-speaker-display {
+            flex: 1;
+            text-align: center;
+            padding: 8px 16px;
+            background: #f5f5f7;
+            border-radius: 12px;
+            min-width: 220px;
+        }
+
+        .current-speaker-label {
+            font-size: 11px;
+            color: #86868b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+
+        .current-speaker-name {
+            font-size: 22px;
+            font-weight: 700;
+            color: #1d1d1f;
+            min-height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .current-speaker-name.speaking {
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        .current-speaker-name .speaker-dot {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+        }
+
+        .no-speaker {
+            color: #86868b;
+            font-weight: 400;
+        }
+
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .speed-control label {
+            font-size: 14px;
+            color: #86868b;
+            font-weight: 500;
+        }
+
+        .speed-control select {
+            background: #f5f5f7;
+            border: 1px solid #d2d2d7;
+            color: #1d1d1f;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .speed-control select:hover {
+            border-color: #0071e3;
+        }
+
+        .timeline-container {
+            position: relative;
+            background: #e8e8ed;
+            border-radius: 12px;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .timeline-track {
+            height: 64px;
+            position: relative;
+        }
+
+        .waveform-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #86868b;
+            font-size: 14px;
+            pointer-events: none;
+            font-weight: 500;
+        }
+
+        .playhead {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: #ff3b30;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        .playhead::before {
+            content: '';
+            position: absolute;
+            top: -6px;
+            left: -6px;
+            width: 15px;
+            height: 15px;
+            background: #ff3b30;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 8px rgba(255,59,48,0.4);
+        }
+
+        .scrub-bar {
+            height: 6px;
+            background: #d2d2d7;
+        }
+
+        .scrub-progress {
+            height: 100%;
+            background: #0071e3;
+            width: 0%;
+            transition: width 0.05s linear;
+        }
+
+        .diarization-header,
+        .transcript-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .diarization-header h2,
+        .transcript-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1d1d1f;
+        }
+
+        .speaker-legend {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #1d1d1f;
+        }
+
+        .legend-color {
+            width: 14px;
+            height: 14px;
+            border-radius: 4px;
+        }
+
+        .tracks-scroll {
+            overflow-x: auto;
+            padding-bottom: 6px;
+        }
+
+        .tracks-container {
+            min-height: 120px;
+            min-width: 100%;
+        }
+
+        .speaker-track {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .speaker-label {
+            width: 120px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #1d1d1f;
+            flex-shrink: 0;
+        }
+
+        .speaker-timeline {
+            flex: 1;
+            height: 36px;
+            background: #f5f5f7;
+            border-radius: 6px;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid #e8e8ed;
+        }
+
+        .segment {
+            position: absolute;
+            top: 3px;
+            bottom: 3px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        .segment:hover {
+            transform: scaleY(1.15);
+            z-index: 10;
+        }
+
+        .segment.active {
+            box-shadow: 0 0 0 3px rgba(0,0,0,0.35);
+            z-index: 20;
+            transform: scaleY(1.15);
+        }
+
+        .zoom-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .zoom-btn {
+            background: #f5f5f7;
+            border: 1px solid #d2d2d7;
+            color: #1d1d1f;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .zoom-btn:hover {
+            background: #e8e8ed;
+            border-color: #0071e3;
+        }
+
+        .zoom-level {
+            font-size: 13px;
+            color: #86868b;
+            min-width: 50px;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .transcript-list {
+            max-height: 420px;
+            overflow-y: auto;
+            border: 1px solid #e8e8ed;
+            border-radius: 12px;
+            background: #fdfdfe;
+            padding: 12px;
+        }
+
+        .transcript-segment {
+            border-left: 4px solid #d2d2d7;
+            background: #fff;
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+        }
+
+        .transcript-segment:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+
+        .transcript-segment.active {
+            box-shadow: 0 0 0 2px rgba(0,113,227,0.25), 0 6px 16px rgba(0,0,0,0.12);
+        }
+
+        .transcript-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            gap: 8px;
+        }
+
+        .transcript-speaker {
+            font-size: 12px;
+            letter-spacing: 0.3px;
+            font-weight: 700;
+        }
+
+        .transcript-time {
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            color: #86868b;
+            font-size: 12px;
+        }
+
+        .transcript-text {
+            font-size: 16px;
+            line-height: 1.55;
+            color: #1d1d1f;
+            word-break: keep-all;
+            white-space: pre-wrap;
+        }
+
+        .word-token {
+            border-radius: 5px;
+            padding: 0 1px;
+            transition: background 0.08s linear;
+        }
+
+        .word-token.active {
+            background: rgba(0,113,227,0.16);
+            box-shadow: inset 0 -1px 0 rgba(0,113,227,0.3);
+        }
+
+        .segment-tooltip {
+            position: fixed;
+            background: #1d1d1f;
+            color: #fff;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            pointer-events: none;
+            z-index: 1000;
+            display: none;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+
+        .stats {
+            display: flex;
+            gap: 40px;
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid #e8e8ed;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            text-align: center;
+            min-width: 120px;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #0071e3;
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: #86868b;
+            margin-top: 4px;
+            font-weight: 500;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #86868b;
+        }
+
+        .empty-state p {
+            font-size: 15px;
+            font-weight: 500;
+        }
+
+        .keyboard-shortcuts h3 {
+            font-size: 14px;
+            margin-bottom: 12px;
+            color: #1d1d1f;
+            font-weight: 600;
+        }
+
+        .shortcuts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 10px;
+        }
+
+        .shortcut {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: #1d1d1f;
+        }
+
+        .shortcut kbd {
+            background: #f5f5f7;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+            border: 1px solid #d2d2d7;
+            font-weight: 500;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .speaker-0, .color-0 { background: #ff3b30; }
+        .speaker-1, .color-1 { background: #34c759; }
+        .speaker-2, .color-2 { background: #007aff; }
+        .speaker-3, .color-3 { background: #ff9500; }
+        .speaker-4, .color-4 { background: #af52de; }
+        .speaker-5, .color-5 { background: #00c7be; }
+        .speaker-6, .color-6 { background: #ff2d55; }
+        .speaker-7, .color-7 { background: #5856d6; }
+        .speaker-8, .color-8 { background: #ffcc00; }
+        .speaker-9, .color-9 { background: #64d2ff; }
+
+        @media (max-width: 860px) {
+            .controls {
+                align-items: stretch;
+            }
+
+            .current-speaker-display {
+                order: 4;
+                width: 100%;
+            }
+
+            .stats {
+                gap: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Transcript Viewer</h1>
+
+        <div class="file-inputs">
+            <div class="file-input-group">
+                <label>Audio File (WAV, MP3, etc.)</label>
+                <input type="file" id="audioFile" accept="audio/*">
+            </div>
+            <div class="file-input-group">
+                <label>Output JSON File</label>
+                <input type="file" id="jsonFile" accept=".json,application/json">
+            </div>
+        </div>
+
+        <div class="player-section">
+            <div class="controls">
+                <button class="play-btn" id="playBtn" disabled>
+                    <span id="playIcon">▶</span>
+                </button>
+                <div class="time-display">
+                    <span id="currentTime">0:00.0</span> / <span id="totalTime">0:00.0</span>
+                </div>
+
+                <div class="current-speaker-display">
+                    <div class="current-speaker-label">Currently Speaking</div>
+                    <div class="current-speaker-name" id="currentSpeaker">
+                        <span class="no-speaker">—</span>
+                    </div>
+                </div>
+
+                <div class="speed-control">
+                    <label>Speed:</label>
+                    <select id="speedSelect">
+                        <option value="0.5">0.5x</option>
+                        <option value="0.75">0.75x</option>
+                        <option value="1" selected>1x</option>
+                        <option value="1.25">1.25x</option>
+                        <option value="1.5">1.5x</option>
+                        <option value="2">2x</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="timeline-container" id="timelineContainer">
+                <div class="timeline-track" id="timelineTrack">
+                    <div class="waveform-placeholder" id="timelinePlaceholder">Load an audio file to begin</div>
+                    <div class="playhead" id="playhead" style="left: 0;"></div>
+                </div>
+                <div class="scrub-bar">
+                    <div class="scrub-progress" id="scrubProgress"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="diarization-view">
+            <div class="diarization-header">
+                <h2>Speaker Diarization</h2>
+                <div class="zoom-controls">
+                    <button class="zoom-btn" id="zoomOut">−</button>
+                    <span class="zoom-level" id="zoomLevel">100%</span>
+                    <button class="zoom-btn" id="zoomIn">+</button>
+                </div>
+            </div>
+
+            <div class="speaker-legend" id="speakerLegend"></div>
+
+            <div class="tracks-scroll">
+                <div class="tracks-container" id="tracksContainer">
+                    <div class="empty-state" id="emptyDiarizationState">
+                        <p>Load an output.json file to visualize speaker tracks</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats" id="stats" style="display:none;">
+                <div class="stat">
+                    <div class="stat-value" id="statSpeakers">0</div>
+                    <div class="stat-label">Speakers</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="statSegments">0</div>
+                    <div class="stat-label">Segments</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="statDuration">0:00.0</div>
+                    <div class="stat-label">Total Speech</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="statWords">0</div>
+                    <div class="stat-label">Words</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="transcript-view">
+            <div class="transcript-header">
+                <h2>Transcript</h2>
+            </div>
+            <div class="transcript-list" id="transcriptList">
+                <div class="empty-state" id="emptyTranscriptState">
+                    <p>Load output.json to view speaker-labeled transcript</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="keyboard-shortcuts">
+            <h3>Keyboard Shortcuts</h3>
+            <div class="shortcuts-grid">
+                <div class="shortcut"><kbd>Space</kbd> Play / Pause</div>
+                <div class="shortcut"><kbd>←</kbd> Back 5s</div>
+                <div class="shortcut"><kbd>→</kbd> Forward 5s</div>
+                <div class="shortcut"><kbd>J</kbd> Back 10s</div>
+                <div class="shortcut"><kbd>L</kbd> Forward 10s</div>
+                <div class="shortcut"><kbd>Home</kbd> Go to start</div>
+                <div class="shortcut"><kbd>N</kbd> Next segment</div>
+                <div class="shortcut"><kbd>P</kbd> Previous segment</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="segment-tooltip" id="tooltip"></div>
+    <audio id="audioPlayer"></audio>
+
+    <script>
+        let segments = [];
+        let speakers = [];
+        let speakerColors = {};
+        let duration = 0;
+        let zoom = 1;
+        let autoScrolledSegment = -1;
+
+        const audioPlayer = document.getElementById('audioPlayer');
+        const audioFileInput = document.getElementById('audioFile');
+        const jsonFileInput = document.getElementById('jsonFile');
+        const playBtn = document.getElementById('playBtn');
+        const playIcon = document.getElementById('playIcon');
+        const currentTimeEl = document.getElementById('currentTime');
+        const totalTimeEl = document.getElementById('totalTime');
+        const currentSpeakerEl = document.getElementById('currentSpeaker');
+        const speedSelect = document.getElementById('speedSelect');
+        const timelineContainer = document.getElementById('timelineContainer');
+        const playhead = document.getElementById('playhead');
+        const scrubProgress = document.getElementById('scrubProgress');
+        const timelinePlaceholder = document.getElementById('timelinePlaceholder');
+        const speakerLegend = document.getElementById('speakerLegend');
+        const tracksContainer = document.getElementById('tracksContainer');
+        const transcriptList = document.getElementById('transcriptList');
+        const tooltip = document.getElementById('tooltip');
+        const zoomIn = document.getElementById('zoomIn');
+        const zoomOut = document.getElementById('zoomOut');
+        const zoomLevel = document.getElementById('zoomLevel');
+        const emptyDiarizationState = document.getElementById('emptyDiarizationState');
+        const emptyTranscriptState = document.getElementById('emptyTranscriptState');
+        const stats = document.getElementById('stats');
+
+        function formatTime(seconds) {
+            const safe = Math.max(0, Number(seconds) || 0);
+            const mins = Math.floor(safe / 60);
+            const secs = (safe % 60).toFixed(1);
+            return `${mins}:${secs.padStart(4, '0')}`;
+        }
+
+        function sortSpeakers(list) {
+            return [...new Set(list)].sort((a, b) => {
+                const aNum = parseInt(String(a).replace(/\D/g, ''), 10);
+                const bNum = parseInt(String(b).replace(/\D/g, ''), 10);
+                if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) return aNum - bNum;
+                return String(a).localeCompare(String(b));
+            });
+        }
+
+        function buildSpeakerColors() {
+            speakerColors = {};
+            speakers.forEach((speaker, i) => {
+                speakerColors[speaker] = i % 10;
+            });
+        }
+
+        function parseOutputJson(text) {
+            const parsed = JSON.parse(text);
+            if (!parsed || !Array.isArray(parsed.segments)) {
+                throw new Error('Invalid JSON format. Expected {"segments": [...]}');
+            }
+
+            return parsed.segments
+                .map((seg) => {
+                    const start = Number(seg.start) || 0;
+                    const durationValue = Number(seg.duration);
+                    const words = Array.isArray(seg.words) ? seg.words.map((word) => ({
+                        text: String(word.text || ''),
+                        start: Number(word.start) || start,
+                        end: Number(word.end) || (Number(word.start) || start)
+                    })) : [];
+                    const endFromWords = words.length ? Math.max(...words.map((w) => w.end)) : start;
+                    const end = Number.isFinite(durationValue) ? start + Math.max(0, durationValue) : Math.max(start, endFromWords);
+                    const duration = Math.max(0, end - start);
+
+                    return {
+                        speaker: String(seg.speaker || 'SPEAKER_00'),
+                        start,
+                        duration,
+                        end,
+                        text: String(seg.text || ''),
+                        words
+                    };
+                })
+                .sort((a, b) => a.start - b.start);
+        }
+
+        function buildTextRanges(text, count) {
+            const ranges = [];
+            if (count <= 0) return ranges;
+            const length = text.length;
+            let cursor = 0;
+
+            for (let i = 0; i < count; i++) {
+                const remainingChars = length - cursor;
+                const remainingWords = count - i;
+                const chunk = remainingWords === 1 ? remainingChars : Math.max(1, Math.floor(remainingChars / remainingWords));
+                const next = i === count - 1 ? length : Math.min(length, cursor + chunk);
+                ranges.push([cursor, next]);
+                cursor = next;
+            }
+
+            return ranges;
+        }
+
+        function renderLegend() {
+            speakerLegend.innerHTML = speakers.map((speaker, i) => `
+                <div class="legend-item">
+                    <div class="legend-color speaker-${i % 10}"></div>
+                    <span>${speaker}</span>
+                </div>
+            `).join('');
+        }
+
+        function renderTracks() {
+            if (!segments.length) {
+                emptyDiarizationState.style.display = 'block';
+                stats.style.display = 'none';
+                return;
+            }
+
+            emptyDiarizationState.style.display = 'none';
+            stats.style.display = 'flex';
+
+            const maxTime = duration || Math.max(...segments.map((s) => s.end));
+            let html = '';
+
+            speakers.forEach((speaker, speakerIndex) => {
+                const speakerSegments = segments
+                    .map((seg, idx) => ({ ...seg, idx }))
+                    .filter((seg) => seg.speaker === speaker);
+
+                html += `
+                    <div class="speaker-track">
+                        <div class="speaker-label">${speaker}</div>
+                        <div class="speaker-timeline" data-speaker="${speaker}">
+                            ${speakerSegments.map((seg) => {
+                                const left = (seg.start / maxTime) * 100;
+                                const width = Math.max((seg.duration / maxTime) * 100, 0.12);
+                                return `<div class="segment speaker-${speakerIndex % 10}" style="left:${left}%;width:${width}%" data-segment-index="${seg.idx}" data-start="${seg.start}" data-duration="${seg.duration}" data-speaker="${speaker}"></div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+
+            tracksContainer.innerHTML = html;
+            tracksContainer.style.width = `${zoom * 100}%`;
+
+            document.getElementById('statSpeakers').textContent = String(speakers.length);
+            document.getElementById('statSegments').textContent = String(segments.length);
+            const totalSpeech = segments.reduce((sum, seg) => sum + seg.duration, 0);
+            document.getElementById('statDuration').textContent = formatTime(totalSpeech);
+            const wordCount = segments.reduce((sum, seg) => sum + seg.words.length, 0);
+            document.getElementById('statWords').textContent = wordCount.toLocaleString();
+
+            document.querySelectorAll('.segment').forEach((el) => {
+                el.addEventListener('click', () => {
+                    const start = Number(el.dataset.start) || 0;
+                    audioPlayer.currentTime = start;
+                    updatePlaybackUI();
+                });
+
+                el.addEventListener('mouseenter', () => {
+                    const start = Number(el.dataset.start) || 0;
+                    const dur = Number(el.dataset.duration) || 0;
+                    const speaker = el.dataset.speaker || '';
+                    tooltip.innerHTML = `<strong>${speaker}</strong><br>${formatTime(start)} -> ${formatTime(start + dur)} (${dur.toFixed(2)}s)`;
+                    tooltip.style.display = 'block';
+                });
+
+                el.addEventListener('mousemove', (event) => {
+                    tooltip.style.left = `${event.clientX + 12}px`;
+                    tooltip.style.top = `${event.clientY + 12}px`;
+                });
+
+                el.addEventListener('mouseleave', () => {
+                    tooltip.style.display = 'none';
+                });
+            });
+        }
+
+        function renderTranscript() {
+            if (!segments.length) {
+                emptyTranscriptState.style.display = 'block';
+                return;
+            }
+
+            emptyTranscriptState.style.display = 'none';
+
+            transcriptList.innerHTML = segments.map((seg, segIndex) => {
+                const colorIndex = speakerColors[seg.speaker] ?? 0;
+                const ranges = buildTextRanges(seg.text, seg.words.length || 1);
+
+                let wordsHtml = '';
+                if (seg.words.length > 0) {
+                    wordsHtml = seg.words.map((word, wordIndex) => {
+                        const range = ranges[wordIndex] || [0, 0];
+                        const token = seg.text.slice(range[0], range[1]) || '';
+                        const safeToken = token || ' ';
+                        return `<span class="word-token" data-segment-index="${segIndex}" data-word-index="${wordIndex}" data-start="${word.start}" data-end="${word.end}">${safeToken}</span>`;
+                    }).join('');
+                } else {
+                    wordsHtml = `<span class="word-token" data-segment-index="${segIndex}" data-word-index="0" data-start="${seg.start}" data-end="${seg.end}">${seg.text || ''}</span>`;
+                }
+
+                return `
+                    <div class="transcript-segment" data-segment-index="${segIndex}" data-start="${seg.start}" style="border-left-color: var(--speaker-color, #d2d2d7); --speaker-color: ${getSpeakerHex(colorIndex)};">
+                        <div class="transcript-meta">
+                            <div class="transcript-speaker" style="color:${getSpeakerHex(colorIndex)}">${seg.speaker}</div>
+                            <div class="transcript-time">${formatTime(seg.start)}</div>
+                        </div>
+                        <div class="transcript-text">${wordsHtml}</div>
+                    </div>
+                `;
+            }).join('');
+
+            document.querySelectorAll('.transcript-segment').forEach((el) => {
+                el.addEventListener('click', () => {
+                    audioPlayer.currentTime = Number(el.dataset.start) || 0;
+                    updatePlaybackUI();
+                });
+            });
+
+            document.querySelectorAll('.word-token').forEach((el) => {
+                el.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    audioPlayer.currentTime = Number(el.dataset.start) || 0;
+                    updatePlaybackUI();
+                });
+            });
+        }
+
+        function getSpeakerHex(index) {
+            const palette = ['#ff3b30', '#34c759', '#007aff', '#ff9500', '#af52de', '#00c7be', '#ff2d55', '#5856d6', '#ffcc00', '#64d2ff'];
+            return palette[index % palette.length];
+        }
+
+        function getActiveSegment(time) {
+            for (let i = 0; i < segments.length; i++) {
+                const seg = segments[i];
+                if (time >= seg.start && time <= seg.end) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        function getActiveWord(segment, time) {
+            if (!segment || !segment.words.length) return -1;
+            for (let i = 0; i < segment.words.length; i++) {
+                const word = segment.words[i];
+                if (time >= word.start && time <= word.end) return i;
+            }
+            return -1;
+        }
+
+        function updateCurrentSpeaker(activeIndex) {
+            if (activeIndex < 0) {
+                currentSpeakerEl.innerHTML = '<span class="no-speaker">—</span>';
+                currentSpeakerEl.classList.remove('speaking');
+                return;
+            }
+
+            const seg = segments[activeIndex];
+            const colorIndex = speakerColors[seg.speaker] ?? 0;
+            currentSpeakerEl.innerHTML = `<span class="speaker-dot color-${colorIndex}"></span>${seg.speaker}`;
+            currentSpeakerEl.classList.add('speaking');
+        }
+
+        function updateTranscriptHighlights(activeSegIndex, activeWordIdx) {
+            document.querySelectorAll('.transcript-segment').forEach((node) => {
+                const index = Number(node.dataset.segmentIndex);
+                node.classList.toggle('active', index === activeSegIndex);
+            });
+
+            document.querySelectorAll('.word-token').forEach((node) => {
+                const sIndex = Number(node.dataset.segmentIndex);
+                const wIndex = Number(node.dataset.wordIndex);
+                node.classList.toggle('active', sIndex === activeSegIndex && wIndex === activeWordIdx);
+            });
+
+            if (activeSegIndex >= 0 && activeSegIndex !== autoScrolledSegment) {
+                const node = document.querySelector(`.transcript-segment[data-segment-index="${activeSegIndex}"]`);
+                if (node) {
+                    node.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    autoScrolledSegment = activeSegIndex;
+                }
+            }
+        }
+
+        function updatePlaybackUI() {
+            const time = audioPlayer.currentTime || 0;
+            const safeDuration = duration || audioPlayer.duration || 0;
+            const progress = safeDuration > 0 ? time / safeDuration : 0;
+
+            playhead.style.left = `${Math.min(progress * 100, 100)}%`;
+            scrubProgress.style.width = `${Math.min(progress * 100, 100)}%`;
+            currentTimeEl.textContent = formatTime(time);
+
+            const segIndex = getActiveSegment(time);
+            const wordIndex = segIndex >= 0 ? getActiveWord(segments[segIndex], time) : -1;
+            updateCurrentSpeaker(segIndex);
+            updateTranscriptHighlights(segIndex, wordIndex);
+
+            document.querySelectorAll('.segment').forEach((el) => {
+                const idx = Number(el.dataset.segmentIndex);
+                el.classList.toggle('active', idx === segIndex);
+            });
+        }
+
+        function jumpToSegment(direction) {
+            if (!segments.length) return;
+            const time = audioPlayer.currentTime || 0;
+            let targetIndex = -1;
+
+            if (direction > 0) {
+                for (let i = 0; i < segments.length; i++) {
+                    if (segments[i].start > time + 0.02) {
+                        targetIndex = i;
+                        break;
+                    }
+                }
+                if (targetIndex < 0) targetIndex = segments.length - 1;
+            } else {
+                for (let i = segments.length - 1; i >= 0; i--) {
+                    if (segments[i].start < time - 0.02) {
+                        targetIndex = i;
+                        break;
+                    }
+                }
+                if (targetIndex < 0) targetIndex = 0;
+            }
+
+            audioPlayer.currentTime = segments[targetIndex].start;
+            updatePlaybackUI();
+        }
+
+        audioFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            audioPlayer.src = URL.createObjectURL(file);
+            audioPlayer.addEventListener('loadedmetadata', () => {
+                duration = audioPlayer.duration || 0;
+                totalTimeEl.textContent = formatTime(duration);
+                playBtn.disabled = false;
+                timelinePlaceholder.textContent = file.name;
+                renderTracks();
+                updatePlaybackUI();
+            }, { once: true });
+        });
+
+        jsonFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (loadEvent) => {
+                try {
+                    segments = parseOutputJson(loadEvent.target.result);
+                    speakers = sortSpeakers(segments.map((s) => s.speaker));
+                    buildSpeakerColors();
+                    autoScrolledSegment = -1;
+                    renderLegend();
+                    renderTracks();
+                    renderTranscript();
+                    updatePlaybackUI();
+                } catch (err) {
+                    alert(err.message);
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        playBtn.addEventListener('click', () => {
+            if (audioPlayer.paused) {
+                audioPlayer.play();
+            } else {
+                audioPlayer.pause();
+            }
+        });
+
+        audioPlayer.addEventListener('play', () => {
+            playIcon.textContent = '⏸';
+        });
+
+        audioPlayer.addEventListener('pause', () => {
+            playIcon.textContent = '▶';
+        });
+
+        audioPlayer.addEventListener('timeupdate', updatePlaybackUI);
+
+        speedSelect.addEventListener('change', () => {
+            audioPlayer.playbackRate = Number(speedSelect.value) || 1;
+        });
+
+        timelineContainer.addEventListener('click', (event) => {
+            const safeDuration = duration || audioPlayer.duration || 0;
+            if (!safeDuration) return;
+            const rect = timelineContainer.getBoundingClientRect();
+            const progress = (event.clientX - rect.left) / rect.width;
+            audioPlayer.currentTime = Math.min(safeDuration, Math.max(0, progress * safeDuration));
+            updatePlaybackUI();
+        });
+
+        zoomIn.addEventListener('click', () => {
+            zoom = Math.min(zoom * 1.5, 10);
+            zoomLevel.textContent = `${Math.round(zoom * 100)}%`;
+            tracksContainer.style.width = `${zoom * 100}%`;
+        });
+
+        zoomOut.addEventListener('click', () => {
+            zoom = Math.max(zoom / 1.5, 1);
+            zoomLevel.textContent = `${Math.round(zoom * 100)}%`;
+            tracksContainer.style.width = `${zoom * 100}%`;
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || event.target.tagName === 'SELECT') {
+                return;
+            }
+
+            const safeDuration = duration || audioPlayer.duration || 0;
+
+            switch (event.code) {
+                case 'Space':
+                    event.preventDefault();
+                    if (!playBtn.disabled) playBtn.click();
+                    break;
+                case 'ArrowLeft':
+                    audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 5);
+                    break;
+                case 'ArrowRight':
+                    audioPlayer.currentTime = Math.min(safeDuration, audioPlayer.currentTime + 5);
+                    break;
+                case 'KeyJ':
+                    audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - 10);
+                    break;
+                case 'KeyL':
+                    audioPlayer.currentTime = Math.min(safeDuration, audioPlayer.currentTime + 10);
+                    break;
+                case 'Home':
+                    audioPlayer.currentTime = 0;
+                    break;
+                case 'KeyN':
+                    jumpToSegment(1);
+                    break;
+                case 'KeyP':
+                    jumpToSegment(-1);
+                    break;
+                default:
+                    return;
+            }
+
+            updatePlaybackUI();
+        });
+    </script>
+</body>
+</html>
