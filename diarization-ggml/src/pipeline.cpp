@@ -9,11 +9,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <deque>
 #include <vector>
 
 static constexpr int SAMPLE_RATE = 16000;
 static constexpr double MIN_SEGMENT_DURATION = 20.0;
 static constexpr int MAX_WHISPER_SAMPLES = 30 * SAMPLE_RATE;
+
+struct PendingSubmission {
+    std::vector<float> audio;
+    double start_time;
+};
 
 struct PipelineState {
     SilenceFilter* silence_filter;
@@ -29,11 +35,27 @@ struct PipelineState {
     void* user_data;
 
     std::vector<AlignedSegment> all_segments;
+    std::vector<TranscribeToken> all_tokens;
+    std::deque<PendingSubmission> submission_queue;
 
     whisper_vad_context* vad_ctx;
 };
 
-static void submit_audio_chunk(PipelineState* state, int64_t abs_start, int64_t abs_end) {
+static void try_submit_next(PipelineState* state) {
+    if (state->whisper_in_flight || state->submission_queue.empty()) return;
+
+    PendingSubmission sub = std::move(state->submission_queue.front());
+    state->submission_queue.pop_front();
+
+    fprintf(stderr, "[pipeline] try_submit_next: submitting %.3fs to Whisper (queue: %zu remaining)\n",
+            static_cast<double>(sub.audio.size()) / SAMPLE_RATE,
+            state->submission_queue.size());
+
+    transcriber_submit(state->transcriber, sub.audio.data(), (int)sub.audio.size(), sub.start_time);
+    state->whisper_in_flight = true;
+}
+
+static void enqueue_audio_chunk(PipelineState* state, int64_t abs_start, int64_t abs_end) {
     std::vector<float> audio;
     state->audio_buffer.read_range(abs_start, abs_end, audio);
 
@@ -43,25 +65,32 @@ static void submit_audio_chunk(PipelineState* state, int64_t abs_start, int64_t 
         audio.resize(MAX_WHISPER_SAMPLES);
     }
 
-    fprintf(stderr, "[pipeline] submit_audio_chunk: submitting %.3fs to Whisper\n",
-            static_cast<double>(audio.size()) / SAMPLE_RATE);
-
-    transcriber_submit(state->transcriber, audio.data(), (int)audio.size(), state->buffer_start_time);
+    double start_time = state->buffer_start_time;
 
     state->audio_buffer.dequeue_up_to(abs_end);
     state->buffer_start_time = static_cast<double>(state->audio_buffer.dequeued_frames()) / SAMPLE_RATE;
-    state->whisper_in_flight = true;
+
+    fprintf(stderr, "[pipeline] enqueue_audio_chunk: queued %.3fs (start=%.3fs, queue: %zu)\n",
+            static_cast<double>(audio.size()) / SAMPLE_RATE,
+            start_time,
+            state->submission_queue.size() + 1);
+
+    state->submission_queue.push_back({std::move(audio), start_time});
+    try_submit_next(state);
 }
 
 static void handle_whisper_result(PipelineState* state, const TranscribeResult& result, const DiarizationResult& diarization) {
     if (!result.valid || result.tokens.empty()) return;
 
-    fprintf(stderr, "[pipeline] whisper_result: received %zu tokens\n", result.tokens.size());
+    fprintf(stderr, "[pipeline] whisper_result: received %zu tokens (total: %zu)\n",
+            result.tokens.size(), state->all_tokens.size() + result.tokens.size());
     fprintf(stderr, "[pipeline] recluster: diarization has %zu segments\n", diarization.segments.size());
 
-    std::vector<AlignedSegment> segments = align_words(result.tokens, diarization);
-    fprintf(stderr, "[pipeline] align: produced %zu aligned segments\n", segments.size());
-    state->all_segments.insert(state->all_segments.end(), segments.begin(), segments.end());
+    state->all_tokens.insert(state->all_tokens.end(), result.tokens.begin(), result.tokens.end());
+
+    state->all_segments = align_words(state->all_tokens, diarization);
+    fprintf(stderr, "[pipeline] align: produced %zu aligned segments from %zu tokens\n",
+            state->all_segments.size(), state->all_tokens.size());
 
     if (state->callback) {
         state->callback(state->all_segments, state->user_data);
@@ -149,16 +178,16 @@ void pipeline_push(PipelineState* state, const float* samples, int n_samples) {
                 if (segment_duration >= MIN_SEGMENT_DURATION) {
                     int64_t buffer_start_abs = state->audio_buffer.dequeued_frames();
                     int64_t cut_abs = static_cast<int64_t>(std::round(seg_end_time * SAMPLE_RATE));
-                    submit_audio_chunk(state, buffer_start_abs, cut_abs);
+                    enqueue_audio_chunk(state, buffer_start_abs, cut_abs);
                 }
             }
         }
     }
 
-    if (need_flush && state->audio_buffer.size() > 0 && !state->whisper_in_flight) {
+    if (need_flush && state->audio_buffer.size() > 0) {
         int64_t abs_start = state->audio_buffer.dequeued_frames();
         int64_t abs_end = state->audio_buffer.total_frames();
-        submit_audio_chunk(state, abs_start, abs_end);
+        enqueue_audio_chunk(state, abs_start, abs_end);
     }
 
     TranscribeResult result;
@@ -166,6 +195,7 @@ void pipeline_push(PipelineState* state, const float* samples, int n_samples) {
         DiarizationResult diarization = streaming_recluster(state->streaming_state);
         handle_whisper_result(state, result, diarization);
         state->whisper_in_flight = false;
+        try_submit_next(state);
     }
 }
 
@@ -174,6 +204,7 @@ void pipeline_finalize(PipelineState* state) {
 
     fprintf(stderr, "[pipeline] finalize: Finalizing...\n");
 
+    // Flush silence filter into diarization
     SilenceFilterResult sf_flush = silence_filter_flush(state->silence_filter);
     fprintf(stderr, "[pipeline] finalize: silence_filter_flush emitted %zu samples\n", sf_flush.audio.size());
     if (!sf_flush.audio.empty()) {
@@ -183,39 +214,40 @@ void pipeline_finalize(PipelineState* state) {
         fprintf(stderr, "[pipeline] finalize: streaming_push returned %zu VAD chunks\n", vad_chunks.size());
     }
 
+    // Enqueue any remaining audio in the buffer
+    if (state->audio_buffer.size() > 0) {
+        int64_t abs_start = state->audio_buffer.dequeued_frames();
+        int64_t abs_end = state->audio_buffer.total_frames();
+        enqueue_audio_chunk(state, abs_start, abs_end);
+    }
+
+    // Drain the submission queue: process each chunk one by one
+    fprintf(stderr, "[pipeline] finalize: draining %zu queued submissions + %s in-flight\n",
+            state->submission_queue.size(),
+            state->whisper_in_flight ? "1" : "0");
+
+    while (state->whisper_in_flight || !state->submission_queue.empty()) {
+        if (state->whisper_in_flight) {
+            TranscribeResult result = transcriber_wait_result(state->transcriber);
+            DiarizationResult diarization = streaming_recluster(state->streaming_state);
+            handle_whisper_result(state, result, diarization);
+            state->whisper_in_flight = false;
+        }
+        try_submit_next(state);
+    }
+
+    // Run final diarization with all accumulated data
     fprintf(stderr, "[pipeline] finalize: running streaming_finalize recluster\n");
     DiarizationResult final_diarization = streaming_finalize(state->streaming_state);
     fprintf(stderr, "[pipeline] finalize: final diarization has %zu segments\n", final_diarization.segments.size());
 
-    if (state->whisper_in_flight) {
-        fprintf(stderr, "[pipeline] finalize: waiting for in-flight Whisper result\n");
-        TranscribeResult inflight_result = transcriber_wait_result(state->transcriber);
-        handle_whisper_result(state, inflight_result, final_diarization);
-        state->whisper_in_flight = false;
-    }
-
-    if (state->audio_buffer.size() > 0) {
-        fprintf(stderr, "[pipeline] finalize: flushing remaining buffered audio\n");
-        int64_t abs_start = state->audio_buffer.dequeued_frames();
-        int64_t abs_end = state->audio_buffer.total_frames();
-
-        std::vector<float> audio;
-        state->audio_buffer.read_range(abs_start, abs_end, audio);
-
-        if (!audio.empty()) {
-            if ((int)audio.size() > MAX_WHISPER_SAMPLES) {
-                audio.resize(MAX_WHISPER_SAMPLES);
-            }
-
-            fprintf(stderr, "[pipeline] finalize: submitting final %.3fs to Whisper\n",
-                    static_cast<double>(audio.size()) / SAMPLE_RATE);
-
-            transcriber_submit(state->transcriber, audio.data(), (int)audio.size(), state->buffer_start_time);
-            state->audio_buffer.dequeue_up_to(abs_end);
-
-            fprintf(stderr, "[pipeline] finalize: waiting for final Whisper result\n");
-            TranscribeResult final_result = transcriber_wait_result(state->transcriber);
-            handle_whisper_result(state, final_result, final_diarization);
+    // Final re-alignment of ALL tokens against the complete diarization
+    if (!state->all_tokens.empty()) {
+        state->all_segments = align_words(state->all_tokens, final_diarization);
+        fprintf(stderr, "[pipeline] finalize: final re-alignment produced %zu segments from %zu tokens\n",
+                state->all_segments.size(), state->all_tokens.size());
+        if (state->callback) {
+            state->callback(state->all_segments, state->user_data);
         }
     }
 

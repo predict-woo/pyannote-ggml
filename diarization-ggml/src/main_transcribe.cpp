@@ -431,8 +431,14 @@ int main(int argc, char** argv) {
     struct CallbackCtx {
         std::vector<AlignedSegment> segments;
         std::string output_path;
+        std::string rttm_path;
+        std::string file_id;
     } callback_ctx;
     callback_ctx.output_path = output_path;
+    if (rttm_path) {
+        callback_ctx.rttm_path = rttm_path;
+        callback_ctx.file_id = audio_file_id_from_path(audio_path);
+    }
 
     auto callback = [](const std::vector<AlignedSegment>& segments, void* user_data) {
         auto* ctx = static_cast<CallbackCtx*>(user_data);
@@ -441,6 +447,12 @@ int main(int argc, char** argv) {
         if (!ctx->output_path.empty()) {
             if (!write_segments_json_file(ctx->output_path, ctx->segments)) {
                 fprintf(stderr, "Error: could not write incremental output file '%s'\n", ctx->output_path.c_str());
+            }
+        }
+
+        if (!ctx->rttm_path.empty()) {
+            if (!write_segments_rttm_file(ctx->rttm_path, ctx->file_id, ctx->segments)) {
+                fprintf(stderr, "Error: could not write incremental RTTM file '%s'\n", ctx->rttm_path.c_str());
             }
         }
     };

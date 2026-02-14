@@ -102,8 +102,7 @@ static void worker_loop(Transcriber* t) {
                 if (all_ws) continue;
 
                 auto tdata = whisper_full_get_token_data(t->ctx, seg, tok);
-                // t0/t1 are in 10ms ticks (centiseconds)
-                double t0 = tdata.t0 * 0.01 + start_time;
+                double t0 = (tdata.t_dtw >= 0 ? tdata.t_dtw : tdata.t0) * 0.01 + start_time;
                 double t1 = tdata.t1 * 0.01 + start_time;
                 res.tokens.push_back({text, t0, t1});
             }
@@ -123,6 +122,11 @@ static void worker_loop(Transcriber* t) {
 Transcriber* transcriber_init(const TranscriberConfig& config) {
     auto cparams = whisper_context_default_params();
     cparams.use_gpu = true;
+    cparams.flash_attn = true;
+    cparams.dtw_token_timestamps = true;
+    cparams.dtw_aheads_preset = WHISPER_AHEADS_N_TOP_MOST_NORM;
+    cparams.dtw_n_top = 2;
+    cparams.dtw_mem_size = 1024 * 1024 * 512;
     if (config.whisper_coreml_path) {
         cparams.use_coreml = true;
     }
