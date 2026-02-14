@@ -20,6 +20,10 @@ struct AlignedSegment {
     std::vector<AlignedWord> words;
 };
 
-std::vector<AlignedSegment> align_words(
-    const std::vector<TranscribeToken>& tokens,
+// WhisperX-style segment-level alignment:
+// Each TranscribeSegment gets assigned a speaker based on maximum overlap
+// with diarization segments. All words in a segment inherit that speaker.
+// Consecutive same-speaker segments are merged.
+std::vector<AlignedSegment> align_segments(
+    const std::vector<TranscribeSegment>& segments,
     const DiarizationResult& diarization);

@@ -35,7 +35,7 @@ struct PipelineState {
     void* user_data;
 
     std::vector<AlignedSegment> all_segments;
-    std::vector<TranscribeToken> all_tokens;
+    std::vector<TranscribeSegment> all_transcribe_segments;
     std::deque<PendingSubmission> submission_queue;
 
     whisper_vad_context* vad_ctx;
@@ -80,17 +80,18 @@ static void enqueue_audio_chunk(PipelineState* state, int64_t abs_start, int64_t
 }
 
 static void handle_whisper_result(PipelineState* state, const TranscribeResult& result, const DiarizationResult& diarization) {
-    if (!result.valid || result.tokens.empty()) return;
+    if (!result.valid || result.segments.empty()) return;
 
-    fprintf(stderr, "[pipeline] whisper_result: received %zu tokens (total: %zu)\n",
-            result.tokens.size(), state->all_tokens.size() + result.tokens.size());
+    fprintf(stderr, "[pipeline] whisper_result: received %zu segments (total: %zu)\n",
+            result.segments.size(), state->all_transcribe_segments.size() + result.segments.size());
     fprintf(stderr, "[pipeline] recluster: diarization has %zu segments\n", diarization.segments.size());
 
-    state->all_tokens.insert(state->all_tokens.end(), result.tokens.begin(), result.tokens.end());
+    state->all_transcribe_segments.insert(state->all_transcribe_segments.end(),
+                                           result.segments.begin(), result.segments.end());
 
-    state->all_segments = align_words(state->all_tokens, diarization);
-    fprintf(stderr, "[pipeline] align: produced %zu aligned segments from %zu tokens\n",
-            state->all_segments.size(), state->all_tokens.size());
+    state->all_segments = align_segments(state->all_transcribe_segments, diarization);
+    fprintf(stderr, "[pipeline] align: produced %zu aligned segments from %zu transcribe segments\n",
+            state->all_segments.size(), state->all_transcribe_segments.size());
 
     if (state->callback) {
         state->callback(state->all_segments, state->user_data);
@@ -241,11 +242,10 @@ void pipeline_finalize(PipelineState* state) {
     DiarizationResult final_diarization = streaming_finalize(state->streaming_state);
     fprintf(stderr, "[pipeline] finalize: final diarization has %zu segments\n", final_diarization.segments.size());
 
-    // Final re-alignment of ALL tokens against the complete diarization
-    if (!state->all_tokens.empty()) {
-        state->all_segments = align_words(state->all_tokens, final_diarization);
-        fprintf(stderr, "[pipeline] finalize: final re-alignment produced %zu segments from %zu tokens\n",
-                state->all_segments.size(), state->all_tokens.size());
+    if (!state->all_transcribe_segments.empty()) {
+        state->all_segments = align_segments(state->all_transcribe_segments, final_diarization);
+        fprintf(stderr, "[pipeline] finalize: final re-alignment produced %zu segments from %zu transcribe segments\n",
+                state->all_segments.size(), state->all_transcribe_segments.size());
         if (state->callback) {
             state->callback(state->all_segments, state->user_data);
         }

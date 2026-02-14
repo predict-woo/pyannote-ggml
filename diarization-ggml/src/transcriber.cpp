@@ -69,8 +69,6 @@ static void worker_loop(Transcriber* t) {
         params.print_realtime   = false;
         params.print_timestamps = false;
         params.token_timestamps = true;
-        params.max_len          = 1;
-        params.split_on_word    = true;
         params.language         = t->config.language;
         params.n_threads        = t->config.n_threads;
 
@@ -87,6 +85,14 @@ static void worker_loop(Transcriber* t) {
 
         int n_segments = whisper_full_n_segments(t->ctx);
         for (int seg = 0; seg < n_segments; seg++) {
+            int64_t seg_t0 = whisper_full_get_segment_t0(t->ctx, seg);
+            int64_t seg_t1 = whisper_full_get_segment_t1(t->ctx, seg);
+
+            TranscribeSegment ts;
+            ts.start = seg_t0 * 0.01 + start_time;
+            ts.end   = seg_t1 * 0.01 + start_time;
+
+            std::string seg_text;
             int n_tokens = whisper_full_n_tokens(t->ctx, seg);
             for (int tok = 0; tok < n_tokens; tok++) {
                 const char* text = whisper_full_get_token_text(t->ctx, seg, tok);
@@ -102,9 +108,16 @@ static void worker_loop(Transcriber* t) {
                 if (all_ws) continue;
 
                 auto tdata = whisper_full_get_token_data(t->ctx, seg, tok);
-                double t0 = (tdata.t_dtw >= 0 ? tdata.t_dtw : tdata.t0) * 0.01 + start_time;
+                double t0 = tdata.t0 * 0.01 + start_time;
                 double t1 = tdata.t1 * 0.01 + start_time;
-                res.tokens.push_back({text, t0, t1});
+
+                ts.words.push_back({text, t0, t1});
+                seg_text += text;
+            }
+
+            if (!ts.words.empty()) {
+                ts.text = seg_text;
+                res.segments.push_back(std::move(ts));
             }
         }
 
@@ -123,10 +136,6 @@ Transcriber* transcriber_init(const TranscriberConfig& config) {
     auto cparams = whisper_context_default_params();
     cparams.use_gpu = true;
     cparams.flash_attn = true;
-    cparams.dtw_token_timestamps = true;
-    cparams.dtw_aheads_preset = WHISPER_AHEADS_N_TOP_MOST_NORM;
-    cparams.dtw_n_top = 2;
-    cparams.dtw_mem_size = 1024 * 1024 * 512;
     if (config.whisper_coreml_path) {
         cparams.use_coreml = true;
     }

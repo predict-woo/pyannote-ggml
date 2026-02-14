@@ -20,6 +20,15 @@ DiarizationResult make_diarization(const std::vector<DiarizationResult::Segment>
     return diarization;
 }
 
+TranscribeSegment make_segment(const std::string& text, double start, double end) {
+    TranscribeSegment seg;
+    seg.start = start;
+    seg.end = end;
+    seg.text = text;
+    seg.words.push_back({text, start, end});
+    return seg;
+}
+
 }
 
 int main() {
@@ -28,14 +37,14 @@ int main() {
             {0.0, 5.0, "SPEAKER_00"},
             {5.0, 5.0, "SPEAKER_01"},
         });
-        std::vector<TranscribeToken> tokens = {
-            {"hello", 1.0, 2.0},
-            {"world", 3.0, 4.0},
-            {"foo", 6.0, 7.0},
-            {"bar", 8.0, 9.0},
+        std::vector<TranscribeSegment> segments = {
+            make_segment("hello", 1.0, 2.0),
+            make_segment("world", 3.0, 4.0),
+            make_segment("foo", 6.0, 7.0),
+            make_segment("bar", 8.0, 9.0),
         };
 
-        auto aligned = align_words(tokens, diarization);
+        auto aligned = align_segments(segments, diarization);
         if (require(aligned.size() == 2, "Test 1 expected 2 aligned segments")) return 1;
         if (require(aligned[0].speaker == "SPEAKER_00", "Test 1 first segment speaker")) return 1;
         if (require(aligned[1].speaker == "SPEAKER_01", "Test 1 second segment speaker")) return 1;
@@ -52,12 +61,12 @@ int main() {
             {0.0, 5.0, "SPEAKER_00"},
             {5.0, 5.0, "SPEAKER_01"},
         });
-        std::vector<TranscribeToken> tokens = {
-            {"overlap", 4.5, 5.5},
-            {"mostly01", 4.8, 5.5},
+        std::vector<TranscribeSegment> segments = {
+            make_segment("overlap", 4.5, 5.5),
+            make_segment("mostly01", 4.8, 5.5),
         };
 
-        auto aligned = align_words(tokens, diarization);
+        auto aligned = align_segments(segments, diarization);
         if (require(aligned.size() >= 1, "Test 2 expected at least one aligned segment")) return 1;
 
         const std::string overlap_speaker = aligned[0].words[0].speaker;
@@ -73,11 +82,11 @@ int main() {
             {0.0, 3.0, "SPEAKER_00"},
             {7.0, 3.0, "SPEAKER_01"},
         });
-        std::vector<TranscribeToken> tokens = {
-            {"gap", 4.5, 5.5},
+        std::vector<TranscribeSegment> segments = {
+            make_segment("gap", 4.5, 5.5),
         };
 
-        auto aligned = align_words(tokens, diarization);
+        auto aligned = align_segments(segments, diarization);
         if (require(aligned.size() == 1, "Test 3 expected one aligned segment")) return 1;
         if (require(aligned[0].words.size() == 1, "Test 3 expected one word")) return 1;
         if (require(aligned[0].words[0].speaker == "SPEAKER_00", "Test 3 gap word nearest speaker")) return 1;
@@ -85,12 +94,12 @@ int main() {
 
     {
         DiarizationResult diarization;
-        std::vector<TranscribeToken> empty_tokens;
-        auto aligned_empty_tokens = align_words(empty_tokens, diarization);
-        if (require(aligned_empty_tokens.empty(), "Test 4 empty tokens should produce empty output")) return 1;
+        std::vector<TranscribeSegment> empty_segments;
+        auto aligned_empty = align_segments(empty_segments, diarization);
+        if (require(aligned_empty.empty(), "Test 4 empty segments should produce empty output")) return 1;
 
-        std::vector<TranscribeToken> tokens = {{"lonely", 1.0, 2.0}};
-        auto aligned_empty_diar = align_words(tokens, diarization);
+        std::vector<TranscribeSegment> segments = { make_segment("lonely", 1.0, 2.0) };
+        auto aligned_empty_diar = align_segments(segments, diarization);
         if (require(aligned_empty_diar.size() == 1, "Test 4 empty diarization should still produce one segment")) return 1;
         if (require(aligned_empty_diar[0].speaker == "UNKNOWN", "Test 4 empty diarization speaker should be UNKNOWN")) return 1;
     }
@@ -100,12 +109,12 @@ int main() {
             {0.0, 6.0, "SPEAKER_00"},
             {4.0, 6.0, "SPEAKER_01"},
         });
-        std::vector<TranscribeToken> tokens = {
-            {"in_overlap", 4.5, 5.5},
-            {"more_00", 2.0, 3.0},
+        std::vector<TranscribeSegment> segments = {
+            make_segment("in_overlap", 4.5, 5.5),
+            make_segment("more_00", 2.0, 3.0),
         };
 
-        auto aligned = align_words(tokens, diarization);
+        auto aligned = align_segments(segments, diarization);
         if (require(aligned.size() == 2, "Test 5 expected two aligned segments")) return 1;
         const std::string first_speaker = aligned[0].words[0].speaker;
         const bool first_ok = first_speaker == "SPEAKER_00" || first_speaker == "SPEAKER_01";

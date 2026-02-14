@@ -109,31 +109,45 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    printf("Got %zu tokens\n", result.tokens.size());
+    size_t total_words = 0;
+    for (const auto& seg : result.segments) {
+        total_words += seg.words.size();
+    }
+    printf("Got %zu segments (%zu total words)\n", result.segments.size(), total_words);
 
     int failures = 0;
 
-    if (result.tokens.size() < 10) {
-        printf("FAIL: expected >=10 tokens, got %zu\n", result.tokens.size());
+    if (total_words < 10) {
+        printf("FAIL: expected >=10 words, got %zu\n", total_words);
         failures++;
     }
 
-    for (size_t i = 0; i < result.tokens.size(); i++) {
-        const auto& tok = result.tokens[i];
-        if (tok.text.empty()) {
-            printf("FAIL: token %zu has empty text\n", i);
+    for (size_t s = 0; s < result.segments.size(); s++) {
+        const auto& seg = result.segments[s];
+        if (seg.words.empty()) {
+            printf("FAIL: segment %zu has no words\n", s);
             failures++;
         }
-        if (tok.start > tok.end) {
-            printf("FAIL: token %zu has start (%.3f) > end (%.3f)\n", i, tok.start, tok.end);
-            failures++;
+        for (size_t w = 0; w < seg.words.size(); w++) {
+            const auto& word = seg.words[w];
+            if (word.text.empty()) {
+                printf("FAIL: segment %zu word %zu has empty text\n", s, w);
+                failures++;
+            }
+            if (word.start > word.end) {
+                printf("FAIL: segment %zu word %zu has start (%.3f) > end (%.3f)\n", s, w, word.start, word.end);
+                failures++;
+            }
         }
     }
 
-    printf("\nFirst 10 tokens:\n");
-    for (size_t i = 0; i < std::min(result.tokens.size(), (size_t)10); i++) {
-        printf("  [%.3f - %.3f] '%s'\n",
-               result.tokens[i].start, result.tokens[i].end, result.tokens[i].text.c_str());
+    printf("\nFirst 3 segments:\n");
+    for (size_t s = 0; s < std::min(result.segments.size(), (size_t)3); s++) {
+        const auto& seg = result.segments[s];
+        printf("  Segment %zu [%.3f - %.3f]: '%s'\n", s, seg.start, seg.end, seg.text.c_str());
+        for (size_t w = 0; w < std::min(seg.words.size(), (size_t)5); w++) {
+            printf("    [%.3f - %.3f] '%s'\n", seg.words[w].start, seg.words[w].end, seg.words[w].text.c_str());
+        }
     }
 
     transcriber_free(t);

@@ -4,40 +4,37 @@
 #include <cmath>
 #include <limits>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace {
 
-std::string assign_speaker_for_token(
-    const TranscribeToken& token,
+std::string assign_speaker_for_segment(
+    double seg_start,
+    double seg_end,
     const std::vector<DiarizationResult::Segment>& sorted_segments) {
+
     if (sorted_segments.empty()) {
         return "UNKNOWN";
     }
 
-    const auto right_it = std::lower_bound(
-        sorted_segments.begin(),
-        sorted_segments.end(),
-        token.end,
-        [](const DiarizationResult::Segment& seg, double token_end) {
-            return seg.start < token_end;
-        });
-
     std::unordered_map<std::string, double> overlap_by_speaker;
 
-    for (auto it = sorted_segments.begin(); it != right_it; ++it) {
-        const double seg_start = it->start;
-        const double seg_end = it->start + it->duration;
-        const double overlap = std::min(seg_end, token.end) - std::max(seg_start, token.start);
-        if (overlap >= 0.0) {
-            overlap_by_speaker[it->speaker] += overlap;
+    for (const auto& diar_seg : sorted_segments) {
+        double diar_start = diar_seg.start;
+        double diar_end = diar_seg.start + diar_seg.duration;
+
+        if (diar_end <= seg_start) continue;
+        if (diar_start >= seg_end) break;
+
+        double overlap = std::min(diar_end, seg_end) - std::max(diar_start, seg_start);
+        if (overlap > 0.0) {
+            overlap_by_speaker[diar_seg.speaker] += overlap;
         }
     }
 
     if (!overlap_by_speaker.empty()) {
         std::string best_speaker;
-        double best_overlap = -std::numeric_limits<double>::infinity();
+        double best_overlap = -1.0;
         for (const auto& [speaker, overlap] : overlap_by_speaker) {
             if (overlap > best_overlap) {
                 best_overlap = overlap;
@@ -47,59 +44,64 @@ std::string assign_speaker_for_token(
         return best_speaker;
     }
 
-    const double token_mid = 0.5 * (token.start + token.end);
+    double seg_mid = 0.5 * (seg_start + seg_end);
     std::string nearest_speaker = sorted_segments.front().speaker;
     double best_dist = std::numeric_limits<double>::infinity();
 
-    for (const auto& seg : sorted_segments) {
-        const double seg_mid = seg.start + 0.5 * seg.duration;
-        const double dist = std::abs(token_mid - seg_mid);
+    for (const auto& diar_seg : sorted_segments) {
+        double diar_mid = diar_seg.start + 0.5 * diar_seg.duration;
+        double dist = std::abs(seg_mid - diar_mid);
         if (dist < best_dist) {
             best_dist = dist;
-            nearest_speaker = seg.speaker;
+            nearest_speaker = diar_seg.speaker;
         }
     }
 
     return nearest_speaker;
 }
 
-}
+} // namespace
 
-std::vector<AlignedSegment> align_words(
-    const std::vector<TranscribeToken>& tokens,
+std::vector<AlignedSegment> align_segments(
+    const std::vector<TranscribeSegment>& segments,
     const DiarizationResult& diarization) {
-    if (tokens.empty()) {
+
+    if (segments.empty()) {
         return {};
     }
 
-    std::vector<DiarizationResult::Segment> sorted_segments = diarization.segments;
-    std::sort(sorted_segments.begin(), sorted_segments.end(), [](const auto& a, const auto& b) {
-        if (a.start == b.start) {
-            return a.duration < b.duration;
-        }
+    std::vector<DiarizationResult::Segment> sorted_diar = diarization.segments;
+    std::sort(sorted_diar.begin(), sorted_diar.end(), [](const auto& a, const auto& b) {
         return a.start < b.start;
     });
 
-    std::vector<AlignedSegment> aligned_segments;
-    aligned_segments.reserve(tokens.size());
+    std::vector<AlignedSegment> result;
+    result.reserve(segments.size());
 
-    for (const auto& token : tokens) {
-        AlignedWord word{token.text, token.start, token.end, assign_speaker_for_token(token, sorted_segments)};
+    for (const auto& seg : segments) {
+        std::string speaker = assign_speaker_for_segment(seg.start, seg.end, sorted_diar);
 
-        if (aligned_segments.empty() || aligned_segments.back().speaker != word.speaker) {
-            AlignedSegment seg;
-            seg.speaker = word.speaker;
-            seg.start = word.start;
-            seg.duration = word.end - word.start;
-            seg.words.push_back(std::move(word));
-            aligned_segments.push_back(std::move(seg));
-            continue;
+        std::vector<AlignedWord> aligned_words;
+        aligned_words.reserve(seg.words.size());
+        for (const auto& w : seg.words) {
+            aligned_words.push_back({w.text, w.start, w.end, speaker});
         }
 
-        AlignedSegment& current = aligned_segments.back();
-        current.words.push_back(std::move(word));
-        current.duration = current.words.back().end - current.start;
+        if (!result.empty() && result.back().speaker == speaker) {
+            AlignedSegment& prev = result.back();
+            prev.words.insert(prev.words.end(),
+                              std::make_move_iterator(aligned_words.begin()),
+                              std::make_move_iterator(aligned_words.end()));
+            prev.duration = prev.words.back().end - prev.start;
+        } else {
+            AlignedSegment aligned_seg;
+            aligned_seg.speaker = speaker;
+            aligned_seg.start = seg.start;
+            aligned_seg.duration = seg.end - seg.start;
+            aligned_seg.words = std::move(aligned_words);
+            result.push_back(std::move(aligned_seg));
+        }
     }
 
-    return aligned_segments;
+    return result;
 }
