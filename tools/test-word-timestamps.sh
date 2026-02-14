@@ -124,8 +124,8 @@ import json, sys
 for name in ['default', 'dtw', 'dtw-top2-avg', 'dtw-top2-norm']:
     path = f'$OUTDIR/{name}.json'
     try:
-        with open(path) as f:
-            data = json.load(f)
+        with open(path, 'rb') as f:
+            data = json.loads(f.read().decode('utf-8', errors='replace'))
     except Exception as e:
         print(f'{name}: ERROR reading: {e}')
         continue

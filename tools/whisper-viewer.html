@@ -811,11 +811,11 @@
         }
 
         function decodeTextWithFallback(buffer) {
-            try {
-                return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
-            } catch (_err) {
-                return new TextDecoder('iso-8859-1').decode(buffer);
-            }
+            // Whisper BPE tokenizer splits Korean characters mid-byte, producing
+            // invalid UTF-8 in individual token "text" fields. Use non-fatal UTF-8
+            // decoding which replaces broken sequences with U+FFFD (�) — this is
+            // correct because the split bytes are expected for sub-word tokens.
+            return new TextDecoder('utf-8', { fatal: false }).decode(buffer);
         }
 
         function parseWhisperJsonObject(parsed) {
