@@ -406,13 +406,6 @@
             text-transform: uppercase;
         }
 
-        .segment-text {
-            font-size: 15px;
-            line-height: 1.5;
-            white-space: pre-wrap;
-            margin-bottom: 10px;
-        }
-
         .token-strip,
         .token-strip-dtw {
             height: 18px;
@@ -452,54 +445,58 @@
             box-shadow: inset 0 0 0 2px rgba(255,59,48,0.95);
         }
 
-        .token-list {
-            display: none;
-            gap: 6px;
-            flex-wrap: wrap;
-            margin-top: 4px;
-        }
-
-        .segment-card.expanded .token-list {
-            display: flex;
-        }
-
-        .token-chip {
-            display: inline-flex;
-            flex-direction: column;
-            gap: 3px;
-            padding: 7px 9px;
-            border-radius: 9px;
-            border: 1px solid rgba(0,0,0,0.06);
-            font-size: 12px;
-            background: #fff;
-            min-width: 124px;
-            max-width: 310px;
-            transition: transform 0.1s ease, box-shadow 0.1s ease;
-        }
-
-        .token-chip.active {
-            box-shadow: 0 0 0 2px rgba(255,59,48,0.5);
-            transform: translateY(-1px);
-        }
-
-        .token-chip .token-text {
-            font-size: 13px;
-            font-weight: 600;
-            line-height: 1.2;
+        .segment-text {
+            font-size: 15px;
+            line-height: 1.7;
             white-space: pre-wrap;
-            word-break: break-word;
+            margin-bottom: 10px;
         }
 
-        .token-chip .token-meta {
+        .token-span {
+            border-radius: 4px;
+            padding: 1px 0;
+            cursor: pointer;
+            transition: background 0.1s ease, box-shadow 0.1s ease;
+            position: relative;
+        }
+
+        .token-span:hover {
+            background: rgba(0,113,227,0.1);
+        }
+
+        .token-span.active {
+            background: rgba(255,59,48,0.2);
+            box-shadow: 0 2px 0 0 #ff3b30;
+        }
+
+        .token-span.conf-low {
+            text-decoration: underline wavy rgba(255,59,48,0.5);
+            text-underline-offset: 3px;
+        }
+
+        .token-tooltip {
+            display: none;
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1d1d1f;
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 8px;
             font-family: 'SF Mono', Monaco, monospace;
-            color: #616168;
-            font-size: 10px;
-            line-height: 1.25;
+            font-size: 11px;
+            white-space: nowrap;
+            z-index: 200;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            line-height: 1.4;
         }
 
-        .token-chip.conf-high { background: rgba(52,199,89,0.12); }
-        .token-chip.conf-mid { background: rgba(255,214,10,0.2); }
-        .token-chip.conf-low { background: rgba(255,59,48,0.14); }
+        .token-span:hover .token-tooltip,
+        .token-span.active .token-tooltip {
+            display: block;
+        }
 
         .token-block.conf-high { background: rgba(52,199,89,0.8); }
         .token-block.conf-mid { background: rgba(255,214,10,0.85); }
@@ -737,7 +734,6 @@
         let duration = 0;
         let activeSegmentIndex = -1;
         let activeTokenIndex = -1;
-        let expandedSegmentIndex = -1;
         let animationFrame = 0;
         let isScrubbing = false;
 
@@ -993,32 +989,31 @@
             return { label, strip };
         }
 
-        function buildTokenChip(token, segIndex, tokIndex, active) {
-            const chip = document.createElement('div');
-            chip.className = `token-chip ${confidenceClass(token.p)}${active ? ' active' : ''}`;
-            chip.dataset.segmentIndex = String(segIndex);
-            chip.dataset.tokenIndex = String(tokIndex);
+        function buildTokenSpan(token, segIndex, tokIndex, active) {
+            const span = document.createElement('span');
+            const isSpecial = token.text.startsWith('[');
+            if (isSpecial) return null; // skip special tokens like [_BEG_], [_TT_...]
 
-            const text = document.createElement('div');
-            text.className = 'token-text';
-            text.textContent = token.text || ' ';
-            chip.appendChild(text);
+            span.className = `token-span ${confidenceClass(token.p)}${active ? ' active' : ''}`;
+            span.dataset.segmentIndex = String(segIndex);
+            span.dataset.tokenIndex = String(tokIndex);
+            span.textContent = token.text;
 
-            const meta = document.createElement('div');
-            meta.className = 'token-meta';
+            const tooltip = document.createElement('div');
+            tooltip.className = 'token-tooltip';
             const pVal = Number.isFinite(token.p) ? token.p.toFixed(3) : 'n/a';
-            const defaultTs = `${formatMs(token.startMs)} -> ${formatMs(token.endMs)}`;
-            const dtwText = token.dtwSec != null ? ` | DTW ${formatTime(token.dtwSec)}` : '';
-            meta.textContent = `p=${pVal} | ${defaultTs}${dtwText}`;
-            chip.appendChild(meta);
+            const defaultTs = `${formatMs(token.startMs)} → ${formatMs(token.endMs)}`;
+            const dtwText = token.dtwSec != null ? `\nDTW: ${formatTime(token.dtwSec)}` : '';
+            tooltip.textContent = `p=${pVal}  ${defaultTs}${dtwText}`;
+            span.appendChild(tooltip);
 
-            chip.addEventListener('click', (event) => {
+            span.addEventListener('click', (event) => {
                 event.stopPropagation();
                 audioPlayer.currentTime = clampTime(token.startMs / 1000);
                 updatePlaybackUI(true);
             });
 
-            return chip;
+            return span;
         }
 
         function renderTimelineSegments() {
@@ -1090,7 +1085,6 @@
                 card.className = 'segment-card';
                 card.dataset.segmentIndex = String(segIdx);
                 if (segIdx === activeSegmentIndex) card.classList.add('active');
-                if (segIdx === expandedSegmentIndex || segIdx === activeSegmentIndex) card.classList.add('expanded');
 
                 const meta = document.createElement('div');
                 meta.className = 'segment-meta';
@@ -1106,13 +1100,11 @@
 
                 const text = document.createElement('div');
                 text.className = 'segment-text';
-                text.textContent = segment.text || '';
+                segment.tokens.forEach((token, tokIdx) => {
+                    const span = buildTokenSpan(token, segIdx, tokIdx, segIdx === activeSegmentIndex && tokIdx === activeTokenIndex);
+                    if (span) text.appendChild(span);
+                });
                 card.appendChild(text);
-
-                const defaultLabel = document.createElement('div');
-                defaultLabel.className = 'token-strip-label';
-                defaultLabel.textContent = 'Default boundaries';
-                card.appendChild(defaultLabel);
 
                 const tokenStrip = buildTokenStrip(segment, segIdx === activeSegmentIndex ? activeTokenIndex : -1);
                 card.appendChild(tokenStrip);
@@ -1123,15 +1115,7 @@
                     card.appendChild(dtwStripBundle.strip);
                 }
 
-                const tokenList = document.createElement('div');
-                tokenList.className = 'token-list';
-                segment.tokens.forEach((token, tokIdx) => {
-                    tokenList.appendChild(buildTokenChip(token, segIdx, tokIdx, segIdx === activeSegmentIndex && tokIdx === activeTokenIndex));
-                });
-                card.appendChild(tokenList);
-
                 card.addEventListener('click', () => {
-                    expandedSegmentIndex = expandedSegmentIndex === segIdx ? -1 : segIdx;
                     audioPlayer.currentTime = clampTime(segment.startMs / 1000);
                     updatePlaybackUI(true);
                 });
@@ -1288,7 +1272,6 @@
             }
 
             audioPlayer.currentTime = clampTime(primaryData.segments[target].startMs / 1000);
-            expandedSegmentIndex = target;
             updatePlaybackUI(true);
         }
 
@@ -1330,7 +1313,6 @@
 
         async function handlePrimaryJson(file) {
             primaryData = await loadWhisperFile(file);
-            if (expandedSegmentIndex < 0) expandedSegmentIndex = 0;
             timelinePlaceholder.style.display = 'none';
             renderStats();
             renderTimelineSegments();
