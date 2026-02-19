@@ -4,3 +4,7 @@
 [submodule "ggml"]
 	path = ggml
 	url = https://github.com/ggml-org/ggml
+
+[submodule "whisper.cpp"]
+	path = whisper.cpp
+	url = https://github.com/predict-woo/whisper.cpp.git
