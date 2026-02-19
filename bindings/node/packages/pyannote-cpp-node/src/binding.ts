@@ -1,27 +1,26 @@
 import { createRequire } from 'module';
 
-import type { DiarizationResult, ModelConfig, VADChunk } from './types.js';
+import type { ModelConfig, TranscriptionResult } from './types.js';
 
 const require = createRequire(import.meta.url);
 
-export interface NativePyannoteModel {
-  diarize(audio: Float32Array): Promise<DiarizationResult>;
-  createStreamingSession(): NativeStreamingSession;
+export interface NativePipelineModel {
+  transcribe(audio: Float32Array): Promise<TranscriptionResult>;
+  createSession(callback: (segments: any[], audio: Float32Array) => void): NativePipelineSession;
   close(): void;
   isClosed: boolean;
 }
 
-export interface NativeStreamingSession {
-  push(audio: Float32Array): Promise<VADChunk[]>;
-  recluster(): Promise<DiarizationResult>;
-  finalize(): Promise<DiarizationResult>;
+export interface NativePipelineSession {
+  push(audio: Float32Array): Promise<boolean[]>;
+  finalize(): Promise<TranscriptionResult>;
   close(): void;
   isClosed: boolean;
 }
 
 export interface NativeBinding {
-  PyannoteModel: new (config: ModelConfig) => NativePyannoteModel;
-  StreamingSession: new (...args: unknown[]) => NativeStreamingSession;
+  PipelineModel: new (config: ModelConfig) => NativePipelineModel;
+  PipelineSession: new (...args: unknown[]) => NativePipelineSession;
 }
 
 let cachedBinding: NativeBinding | null = null;
@@ -53,8 +52,8 @@ function isNativeBinding(value: unknown): value is NativeBinding {
 
   const candidate = value as Record<string, unknown>;
   return (
-    typeof candidate.PyannoteModel === 'function' &&
-    typeof candidate.StreamingSession === 'function'
+    typeof candidate.PipelineModel === 'function' &&
+    typeof candidate.PipelineSession === 'function'
   );
 }
 
@@ -77,7 +76,7 @@ export function getBinding(): NativeBinding {
 
   if (!isNativeBinding(loaded)) {
     throw new Error(
-      `Invalid native module export from '${packageName}'. Expected PyannoteModel and StreamingSession constructors.`,
+      `Invalid native module export from '${packageName}'. Expected PipelineModel and PipelineSession constructors.`,
     );
   }
 
