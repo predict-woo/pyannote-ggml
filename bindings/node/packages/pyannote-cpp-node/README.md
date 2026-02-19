@@ -1,43 +1,45 @@
 # pyannote-cpp-node
 
-Node.js native bindings for real-time speaker diarization
-
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
+Node.js native bindings for integrated Whisper transcription + speaker diarization with speaker-labeled, word-level output.
+
 ## Overview
 
-`pyannote-cpp-node` provides Node.js bindings to a high-performance C++ port of the [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) pipeline. It achieves **39x real-time** performance on Apple Silicon by leveraging CoreML acceleration (Neural Engine + GPU) for neural network inference and optimized C++ implementations of clustering algorithms.
+`pyannote-cpp-node` exposes the integrated C++ pipeline that combines streaming diarization and Whisper transcription into a single API.
 
-The library supports two modes:
+Given 16 kHz mono PCM audio (`Float32Array`), it produces cumulative and final transcript segments shaped as:
 
-- **Offline diarization**: Process an entire audio file at once and receive speaker-labeled segments
-- **Streaming diarization**: Process audio incrementally in real-time, receive voice activity detection (VAD) as audio arrives, and trigger speaker clustering on demand
+- speaker label (`SPEAKER_00`, `SPEAKER_01`, ...)
+- segment start/duration in seconds
+- segment text
+- per-word timestamps
 
-All heavy operations are asynchronous and run on libuv worker threads, ensuring the Node.js event loop remains responsive.
+The API supports both one-shot processing (`transcribe`) and incremental streaming (`createSession` + `push`/`finalize`). All heavy operations are asynchronous and run on libuv worker threads.
 
 ## Features
 
-- **Offline diarization** — Process full audio files and get speaker-labeled segments
-- **Streaming diarization** — Push audio incrementally, receive real-time VAD, recluster on demand
-- **Async/await API** — All heavy operations return Promises and run on worker threads
-- **CoreML acceleration** — Neural networks run on Apple's Neural Engine, GPU, and CPU
-- **TypeScript-first** — Full type definitions included
-- **Zero-copy audio input** — Direct `Float32Array` input for maximum efficiency
-- **Byte-identical output** — Streaming finalize produces identical results to offline pipeline
+- Integrated transcription + diarization in one pipeline
+- Speaker-labeled, word-level transcript output
+- One-shot and streaming APIs with the same output schema
+- Incremental `segments` events for live applications
+- Deterministic output for the same audio/models/config
+- CoreML-accelerated inference on macOS
+- TypeScript-first API with complete type definitions
 
 ## Requirements
 
-- **macOS** with Apple Silicon (M1/M2/M3/M4) or Intel x64
-- **Node.js** >= 18
-- **Model files**:
-  - Segmentation GGUF model (`segmentation.gguf`)
-  - Embedding GGUF model (`embedding.gguf`)
-  - PLDA GGUF model (`plda.gguf`)
-  - Segmentation CoreML model package (`segmentation.mlpackage/`)
-  - Embedding CoreML model package (`embedding.mlpackage/`)
-
-Model files can be obtained by converting the original PyTorch models using the conversion scripts in the parent repository.
+- macOS (Apple Silicon or Intel)
+- Node.js >= 18
+- Model files:
+  - Segmentation GGUF (`segModelPath`)
+  - Embedding GGUF (`embModelPath`)
+  - PLDA GGUF (`pldaPath`)
+  - Embedding CoreML `.mlpackage` (`coremlPath`)
+  - Segmentation CoreML `.mlpackage` (`segCoremlPath`)
+  - Whisper GGUF (`whisperModelPath`)
+  - Optional Silero VAD model (`vadModelPath`)
 
 ## Installation
 
@@ -45,721 +47,414 @@ Model files can be obtained by converting the original PyTorch models using the 
 npm install pyannote-cpp-node
 ```
 
-Or with pnpm:
-
 ```bash
 pnpm add pyannote-cpp-node
 ```
 
-The package uses `optionalDependencies` to automatically install the correct platform-specific native addon (`@pyannote-cpp-node/darwin-arm64` or `@pyannote-cpp-node/darwin-x64`).
+The package installs a platform-specific native addon through `optionalDependencies`.
 
 ## Quick Start
 
 ```typescript
-import { Pyannote } from 'pyannote-cpp-node';
-import { readFileSync } from 'node:fs';
+import { Pipeline } from 'pyannote-cpp-node';
 
-// Load model (validates all paths exist)
-const model = await Pyannote.load({
+const pipeline = await Pipeline.load({
   segModelPath: './models/segmentation.gguf',
   embModelPath: './models/embedding.gguf',
   pldaPath: './models/plda.gguf',
   coremlPath: './models/embedding.mlpackage',
   segCoremlPath: './models/segmentation.mlpackage',
+  whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
+  language: 'en',
 });
 
-// Load audio (16kHz mono Float32Array - see "Audio Format Requirements")
-const audio = loadWavFile('./audio.wav');
+const audio = loadAudioAsFloat32Array('./audio-16khz-mono.wav');
+const result = await pipeline.transcribe(audio);
 
-// Run diarization
-const result = await model.diarize(audio);
-
-// Print results
 for (const segment of result.segments) {
+  const end = segment.start + segment.duration;
   console.log(
-    `[${segment.start.toFixed(2)}s - ${(segment.start + segment.duration).toFixed(2)}s] ${segment.speaker}`
+    `[${segment.speaker}] ${segment.start.toFixed(2)}-${end.toFixed(2)} ${segment.text.trim()}`
   );
 }
 
-// Clean up
-model.close();
+pipeline.close();
 ```
 
 ## API Reference
 
-### `Pyannote` Class
+### `Pipeline`
 
-The main entry point for loading diarization models.
-
-#### `static async load(config: ModelConfig): Promise<Pyannote>`
-
-Factory method for loading a diarization model. Validates that all model paths exist before initializing. CoreML model compilation happens synchronously during initialization and is typically fast.
-
-**Parameters:**
-- `config: ModelConfig` — Configuration object with paths to all required model files
-
-**Returns:** `Promise<Pyannote>` — Initialized model instance
-
-**Throws:**
-- `Error` if any model path does not exist or is invalid
-
-**Example:**
 ```typescript
-const model = await Pyannote.load({
-  segModelPath: './models/segmentation.gguf',
-  embModelPath: './models/embedding.gguf',
-  pldaPath: './models/plda.gguf',
-  coremlPath: './models/embedding.mlpackage',
-  segCoremlPath: './models/segmentation.mlpackage',
+class Pipeline {
+  static async load(config: ModelConfig): Promise<Pipeline>;
+  async transcribe(audio: Float32Array): Promise<TranscriptionResult>;
+  createSession(): PipelineSession;
+  close(): void;
+  get isClosed(): boolean;
+}
+```
+
+#### `static async load(config: ModelConfig): Promise<Pipeline>`
+
+Validates model paths and initializes native pipeline resources.
+
+#### `async transcribe(audio: Float32Array): Promise<TranscriptionResult>`
+
+Runs one-shot transcription + diarization on the full audio buffer.
+
+#### `createSession(): PipelineSession`
+
+Creates an independent streaming session for incremental processing.
+
+#### `close(): void`
+
+Releases native resources. Safe to call multiple times.
+
+#### `get isClosed(): boolean`
+
+Returns `true` after `close()`.
+
+### `PipelineSession` (extends `EventEmitter`)
+
+```typescript
+class PipelineSession extends EventEmitter {
+  async push(audio: Float32Array): Promise<boolean[]>;
+  async finalize(): Promise<TranscriptionResult>;
+  close(): void;
+  get isClosed(): boolean;
+  // Event: 'segments' -> (segments: AlignedSegment[], audio: Float32Array)
+}
+```
+
+#### `async push(audio: Float32Array): Promise<boolean[]>`
+
+Pushes an arbitrary number of samples into the streaming pipeline.
+
+- Return value is per-frame VAD booleans (`true` = speech, `false` = silence)
+- First 10 seconds return an empty array because the pipeline needs a full 10-second window
+- Chunk size is flexible; not restricted to 16,000-sample pushes
+
+#### `async finalize(): Promise<TranscriptionResult>`
+
+Flushes all stages, runs final recluster + alignment, and returns the definitive result.
+
+#### `close(): void`
+
+Releases native session resources. Safe to call multiple times.
+
+#### `get isClosed(): boolean`
+
+Returns `true` after `close()`.
+
+#### Event: `'segments'`
+
+Emitted after each Whisper transcription result with the latest cumulative aligned output.
+
+```typescript
+session.on('segments', (segments: AlignedSegment[], audio: Float32Array) => {
+  // `segments` contains the latest cumulative speaker-labeled transcript
+  // `audio` contains the chunk submitted for this callback cycle
 });
 ```
 
-#### `async diarize(audio: Float32Array): Promise<DiarizationResult>`
-
-Performs offline diarization on the entire audio file. Audio must be 16kHz mono in `Float32Array` format with values in the range [-1.0, 1.0].
-
-Internally, this method uses the streaming API: it initializes a streaming session, pushes all audio in 1-second chunks, calls finalize, and cleans up. The operation runs on a worker thread and is non-blocking.
-
-**Parameters:**
-- `audio: Float32Array` — Audio samples (16kHz mono, values in [-1.0, 1.0])
-
-**Returns:** `Promise<DiarizationResult>` — Diarization result with speaker-labeled segments sorted by start time
-
-**Throws:**
-- `Error` if model is closed
-- `TypeError` if audio is not a `Float32Array`
-- `Error` if audio is empty
-
-**Example:**
-```typescript
-const result = await model.diarize(audio);
-console.log(`Detected ${result.segments.length} segments`);
-```
-
-#### `createStreamingSession(): StreamingSession`
-
-Creates a new independent streaming session. Each session maintains its own internal state and can be used to process audio incrementally.
-
-**Returns:** `StreamingSession` — New streaming session instance
-
-**Throws:**
-- `Error` if model is closed
-
-**Example:**
-```typescript
-const session = model.createStreamingSession();
-```
-
-#### `close(): void`
-
-Releases all native resources associated with the model. This method is idempotent and safe to call multiple times.
-
-Once closed, the model cannot be used for diarization or creating new streaming sessions. Existing streaming sessions should be closed before closing the model.
-
-**Example:**
-```typescript
-model.close();
-console.log(model.isClosed); // true
-```
-
-#### `get isClosed: boolean`
-
-Indicates whether the model has been closed.
-
-**Returns:** `boolean` — `true` if the model is closed, `false` otherwise
-
-### `StreamingSession` Class
-
-Handles incremental audio processing for real-time diarization.
-
-#### `async push(audio: Float32Array): Promise<VADChunk[]>`
-
-Pushes audio samples to the streaming session. Audio must be 16kHz mono `Float32Array`. Typically, push 1 second of audio (16,000 samples) at a time.
-
-The first chunk requires 10 seconds of accumulated audio to produce output (the segmentation model uses a 10-second window). After that, each subsequent push returns approximately one `VADChunk` (depending on the 1-second hop size).
-
-The returned VAD chunks contain frame-level voice activity (OR of all speakers) for the newly covered frames. In normal mode, the first push that produces output returns 589 frames (full 10-second window); subsequent pushes return ~59-60 new frames each. In zero-latency mode, each push returns ~59-60 frames from the start.
-
-**Parameters:**
-- `audio: Float32Array` — Audio samples (16kHz mono, values in [-1.0, 1.0])
-
-**Returns:** `Promise<VADChunk[]>` — Array of VAD chunks (empty until 10 seconds accumulated)
-
-**Throws:**
-- `Error` if session is closed
-- `TypeError` if audio is not a `Float32Array`
-
-**Example:**
-```typescript
-const vadChunks = await session.push(audioChunk);
-for (const chunk of vadChunks) {
-  console.log(`VAD chunk ${chunk.chunkIndex}: ${chunk.numFrames} frames`);
-}
-```
-
-#### `async recluster(): Promise<DiarizationResult>`
-
-Triggers full clustering on all accumulated audio data. This runs the complete diarization pipeline (embedding extraction → PLDA scoring → hierarchical clustering → VBx refinement → speaker assignment) and returns speaker-labeled segments with global speaker IDs.
-
-**Warning:** This method mutates the internal session state. Specifically, it replaces the internal embedding and chunk index arrays with filtered versions (excluding silent speakers). Calling `push` after `recluster` may produce unexpected results. Use `recluster` sparingly (e.g., every 30 seconds for live progress updates) or only call `finalize` when the stream ends.
-
-The operation runs on a worker thread and is non-blocking.
-
-**Returns:** `Promise<DiarizationResult>` — Complete diarization result with global speaker labels
-
-**Throws:**
-- `Error` if session is closed
-
-**Example:**
-```typescript
-// Trigger intermediate clustering after accumulating data
-const intermediateResult = await session.recluster();
-console.log(`Current speaker count: ${new Set(intermediateResult.segments.map(s => s.speaker)).size}`);
-```
-
-#### `async finalize(): Promise<DiarizationResult>`
-
-Processes any remaining audio (zero-padding partial chunks to match the offline pipeline's chunk count formula), then performs final clustering. This method produces byte-identical output to the offline `diarize()` method when given the same input audio.
-
-Call this method when the audio stream has ended to get the final diarization result.
-
-The operation runs on a worker thread and is non-blocking.
-
-**Returns:** `Promise<DiarizationResult>` — Final diarization result
-
-**Throws:**
-- `Error` if session is closed
-
-**Example:**
-```typescript
-const finalResult = await session.finalize();
-console.log(`Final result: ${finalResult.segments.length} segments`);
-```
-
-#### `close(): void`
-
-Releases all native resources associated with the streaming session. This method is idempotent and safe to call multiple times.
-
-**Example:**
-```typescript
-session.close();
-```
-
-#### `get isClosed: boolean`
-
-Indicates whether the session has been closed.
-
-**Returns:** `boolean` — `true` if the session is closed, `false` otherwise
-
 ### Types
 
-#### `ModelConfig`
-
-Configuration object for loading diarization models.
-
 ```typescript
-interface ModelConfig {
-  segModelPath: string;    // Path to segmentation GGUF model file
-  embModelPath: string;    // Path to embedding GGUF model file
-  pldaPath: string;        // Path to PLDA GGUF model file
-  coremlPath: string;      // Path to embedding CoreML .mlpackage directory
-  segCoremlPath: string;   // Path to segmentation CoreML .mlpackage directory
-  zeroLatency?: boolean;   // Pre-fill 10s silence so first push returns frames immediately (default: false)
+export interface ModelConfig {
+  /** Path to segmentation GGUF model file. */
+  segModelPath: string;
+
+  /** Path to embedding GGUF model file. */
+  embModelPath: string;
+
+  /** Path to PLDA GGUF model file. */
+  pldaPath: string;
+
+  /** Path to embedding CoreML .mlpackage directory. */
+  coremlPath: string;
+
+  /** Path to segmentation CoreML .mlpackage directory. */
+  segCoremlPath: string;
+
+  /** Path to Whisper GGUF model file. */
+  whisperModelPath: string;
+
+  /** Optional path to Silero VAD model file; enables silence compression. */
+  vadModelPath?: string;
+
+  /** Enable GPU for Whisper. Default: true. */
+  useGpu?: boolean;
+
+  /** Enable flash attention when supported. Default: true. */
+  flashAttn?: boolean;
+
+  /** GPU device index. Default: 0. */
+  gpuDevice?: number;
+
+  /**
+   * Enable Whisper CoreML encoder.
+   * Default: false.
+   * Requires a matching `-encoder.mlmodelc` next to the GGUF model.
+   */
+  useCoreml?: boolean;
+
+  /** Suppress Whisper native logs. Default: false. */
+  noPrints?: boolean;
+
+  /** Number of decode threads. Default: 4. */
+  nThreads?: number;
+
+  /** Language code for transcription. Default: 'en'. Omit for auto-detect behavior with model settings. */
+  language?: string;
+
+  /** Translate to English. Default: false. */
+  translate?: boolean;
+
+  /** Force language detection pass. Default: false. */
+  detectLanguage?: boolean;
+
+  /** Base sampling temperature. Default: 0.0 (greedy). */
+  temperature?: number;
+
+  /** Temperature increment for fallback sampling. Default: 0.2. */
+  temperatureInc?: number;
+
+  /** Disable temperature fallback ladder. Default: false. */
+  noFallback?: boolean;
+
+  /** Beam size. Default: -1 (greedy with best_of). */
+  beamSize?: number;
+
+  /** Number of candidates in best-of sampling. Default: 5. */
+  bestOf?: number;
+
+  /** Compression/entropy threshold. Default: 2.4. */
+  entropyThold?: number;
+
+  /** Average logprob threshold. Default: -1.0. */
+  logprobThold?: number;
+
+  /** No-speech probability threshold. Default: 0.6. */
+  noSpeechThold?: number;
+
+  /** Optional initial prompt text. Default: undefined. */
+  prompt?: string;
+
+  /** Disable context carry-over between decode windows. Default: true. */
+  noContext?: boolean;
+
+  /** Suppress blank tokens. Default: true. */
+  suppressBlank?: boolean;
+
+  /** Suppress non-speech tokens. Default: false. */
+  suppressNst?: boolean;
 }
-```
 
-#### `VADChunk`
+export interface AlignedWord {
+  /** Word text (may include leading space from Whisper tokenization). */
+  text: string;
 
-Voice activity detection result for newly covered frames from a streaming push.
+  /** Word start time in seconds. */
+  start: number;
 
-```typescript
-interface VADChunk {
-  chunkIndex: number;      // Zero-based internal chunk number
-  startFrame: number;      // Global frame index of first new frame; time = startFrame * 0.016875
-  numFrames: number;       // Number of new frames (~59-60 per push, or 589 for first chunk in normal mode)
-  vad: Float32Array;       // [numFrames] frame-level voice activity: 1.0 if any speaker active, 0.0 otherwise
+  /** Word end time in seconds. */
+  end: number;
 }
-```
 
-Each frame represents approximately 16.875ms of audio (`FRAME_STEP = 0.016875s`). To compute the time of the first frame: `startFrame * 0.016875`. The `vad` array length matches `numFrames` (variable, not always 589). A value of 1.0 indicates speech activity (any speaker), 0.0 indicates silence.
+export interface AlignedSegment {
+  /** Global speaker label (for example, SPEAKER_00). */
+  speaker: string;
 
-#### `Segment`
+  /** Segment start time in seconds. */
+  start: number;
 
-A contiguous speech segment with speaker label.
+  /** Segment duration in seconds. */
+  duration: number;
 
-```typescript
-interface Segment {
-  start: number;           // Start time in seconds
-  duration: number;        // Duration in seconds
-  speaker: string;         // Speaker label (e.g., "SPEAKER_00", "SPEAKER_01", ...)
+  /** Segment text (concatenated from words). */
+  text: string;
+
+  /** Word-level timestamps for the segment. */
+  words: AlignedWord[];
 }
-```
 
-#### `DiarizationResult`
-
-Complete diarization output with speaker-labeled segments.
-
-```typescript
-interface DiarizationResult {
-  segments: Segment[];     // Array of segments, sorted by start time
+export interface TranscriptionResult {
+  /** Full speaker-labeled transcript segments. */
+  segments: AlignedSegment[];
 }
 ```
 
 ## Usage Examples
 
-### Example 1: Offline Diarization
-
-Process an entire audio file and print a timeline of speaker segments.
+### One-shot transcription
 
 ```typescript
-import { Pyannote } from 'pyannote-cpp-node';
-import { readFileSync } from 'node:fs';
+import { Pipeline } from 'pyannote-cpp-node';
 
-// Helper to load 16-bit PCM WAV and convert to Float32Array
-function loadWavFile(filePath: string): Float32Array {
-  const buffer = readFileSync(filePath);
-  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-
-  // Find data chunk
-  let offset = 12; // Skip RIFF header
-  while (offset < view.byteLength - 8) {
-    const chunkId = String.fromCharCode(
-      view.getUint8(offset),
-      view.getUint8(offset + 1),
-      view.getUint8(offset + 2),
-      view.getUint8(offset + 3)
-    );
-    const chunkSize = view.getUint32(offset + 4, true);
-    offset += 8;
-
-    if (chunkId === 'data') {
-      // Convert Int16 PCM to Float32 by dividing by 32768
-      const numSamples = chunkSize / 2;
-      const float32 = new Float32Array(numSamples);
-      for (let i = 0; i < numSamples; i++) {
-        float32[i] = view.getInt16(offset + i * 2, true) / 32768.0;
-      }
-      return float32;
-    }
-
-    offset += chunkSize;
-    if (chunkSize % 2 !== 0) offset++; // Align to word boundary
-  }
-
-  throw new Error('No data chunk found in WAV file');
-}
-
-async function main() {
-  // Load model
-  const model = await Pyannote.load({
+async function runOneShot(audio: Float32Array) {
+  const pipeline = await Pipeline.load({
     segModelPath: './models/segmentation.gguf',
     embModelPath: './models/embedding.gguf',
     pldaPath: './models/plda.gguf',
     coremlPath: './models/embedding.mlpackage',
     segCoremlPath: './models/segmentation.mlpackage',
+    whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
   });
 
-  // Load audio
-  const audio = loadWavFile('./audio.wav');
-  console.log(`Loaded ${audio.length} samples (${(audio.length / 16000).toFixed(1)}s)`);
+  const result = await pipeline.transcribe(audio);
 
-  // Diarize
-  const result = await model.diarize(audio);
-
-  // Print timeline
-  console.log(`\nDetected ${result.segments.length} segments:`);
-  for (const segment of result.segments) {
-    const startTime = segment.start.toFixed(2);
-    const endTime = (segment.start + segment.duration).toFixed(2);
-    console.log(`[${startTime}s - ${endTime}s] ${segment.speaker}`);
+  for (const seg of result.segments) {
+    const end = seg.start + seg.duration;
+    console.log(`[${seg.speaker}] ${seg.start.toFixed(2)}-${end.toFixed(2)} ${seg.text.trim()}`);
   }
 
-  // Count speakers
-  const speakers = new Set(result.segments.map(s => s.speaker));
-  console.log(`\nTotal speakers: ${speakers.size}`);
-
-  model.close();
+  pipeline.close();
 }
-
-main();
 ```
 
-### Example 2: Streaming Diarization
-
-Process audio incrementally in 1-second chunks, displaying real-time VAD.
+### Streaming transcription
 
 ```typescript
-import { Pyannote } from 'pyannote-cpp-node';
+import { Pipeline } from 'pyannote-cpp-node';
 
-async function streamingDiarization() {
-  const model = await Pyannote.load({
+async function runStreaming(audio: Float32Array) {
+  const pipeline = await Pipeline.load({
     segModelPath: './models/segmentation.gguf',
     embModelPath: './models/embedding.gguf',
     pldaPath: './models/plda.gguf',
     coremlPath: './models/embedding.mlpackage',
     segCoremlPath: './models/segmentation.mlpackage',
+    whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
   });
 
-  const session = model.createStreamingSession();
+  const session = pipeline.createSession();
+  session.on('segments', (segments) => {
+    const latest = segments[segments.length - 1];
+    if (latest) {
+      const end = latest.start + latest.duration;
+      console.log(`[live][${latest.speaker}] ${latest.start.toFixed(2)}-${end.toFixed(2)} ${latest.text.trim()}`);
+    }
+  });
 
-  // Load full audio file
-  const audio = loadWavFile('./audio.wav');
-
-  // Push audio in 1-second chunks (16,000 samples)
-  const CHUNK_SIZE = 16000;
-  let totalChunks = 0;
-
-  for (let offset = 0; offset < audio.length; offset += CHUNK_SIZE) {
-    const end = Math.min(offset + CHUNK_SIZE, audio.length);
-    const chunk = audio.slice(offset, end);
-
-    const vadChunks = await session.push(chunk);
-
-    // VAD chunks are returned after first 10 seconds (or immediately in zero-latency mode)
-    for (const vad of vadChunks) {
-      const activeFrames = vad.vad.filter(v => v > 0.5).length;
-      const speechRatio = (activeFrames / vad.numFrames * 100).toFixed(1);
-      const startTime = vad.startFrame * 0.016875;
-      
-      console.log(
-        `Chunk ${vad.chunkIndex}: frame ${vad.startFrame} (${startTime.toFixed(2)}s) | ` +
-        `${vad.numFrames} frames | Speech: ${speechRatio}%`
-      );
-      totalChunks++;
+  const chunkSize = 16000;
+  for (let i = 0; i < audio.length; i += chunkSize) {
+    const chunk = audio.slice(i, Math.min(i + chunkSize, audio.length));
+    const vad = await session.push(chunk);
+    if (vad.length > 0) {
+      const speechFrames = vad.filter(Boolean).length;
+      console.log(`VAD frames: ${vad.length}, speech frames: ${speechFrames}`);
     }
   }
 
-  console.log(`\nProcessed ${totalChunks} chunks`);
-
-  // Get final diarization result
-  console.log('\nFinalizing...');
-  const result = await session.finalize();
-
-  console.log(`\nFinal result: ${result.segments.length} segments`);
-  for (const segment of result.segments) {
-    console.log(
-      `[${segment.start.toFixed(2)}s - ${(segment.start + segment.duration).toFixed(2)}s] ${segment.speaker}`
-    );
-  }
-
-  session.close();
-  model.close();
-}
-
-streamingDiarization();
-```
-
-### Example 3: On-Demand Reclustering
-
-Push audio and trigger reclustering every 30 seconds to get intermediate results.
-
-```typescript
-import { Pyannote } from 'pyannote-cpp-node';
-
-async function reclusteringExample() {
-  const model = await Pyannote.load({
-    segModelPath: './models/segmentation.gguf',
-    embModelPath: './models/embedding.gguf',
-    pldaPath: './models/plda.gguf',
-    coremlPath: './models/embedding.mlpackage',
-    segCoremlPath: './models/segmentation.mlpackage',
-  });
-
-  const session = model.createStreamingSession();
-  const audio = loadWavFile('./audio.wav');
-
-  const CHUNK_SIZE = 16000; // 1 second
-  const RECLUSTER_INTERVAL = 30; // Recluster every 30 seconds
-
-  let secondsProcessed = 0;
-
-  for (let offset = 0; offset < audio.length; offset += CHUNK_SIZE) {
-    const end = Math.min(offset + CHUNK_SIZE, audio.length);
-    const chunk = audio.slice(offset, end);
-
-    await session.push(chunk);
-    secondsProcessed++;
-
-    // Recluster every 30 seconds
-    if (secondsProcessed % RECLUSTER_INTERVAL === 0) {
-      console.log(`\n--- Reclustering at ${secondsProcessed}s ---`);
-      const intermediateResult = await session.recluster();
-      
-      const speakers = new Set(intermediateResult.segments.map(s => s.speaker));
-      console.log(`Current speakers detected: ${speakers.size}`);
-      console.log(`Current segments: ${intermediateResult.segments.length}`);
-    }
-  }
-
-  // Final result
-  console.log('\n--- Final result ---');
   const finalResult = await session.finalize();
-  const speakers = new Set(finalResult.segments.map(s => s.speaker));
-  console.log(`Total speakers: ${speakers.size}`);
-  console.log(`Total segments: ${finalResult.segments.length}`);
+  console.log(`Final segments: ${finalResult.segments.length}`);
 
   session.close();
-  model.close();
+  pipeline.close();
 }
-
-reclusteringExample();
 ```
 
-### Example 4: Generating RTTM Output
-
-Format diarization results into standard RTTM (Rich Transcription Time Marked) format.
+### Custom Whisper decode options
 
 ```typescript
-import { Pyannote, type DiarizationResult } from 'pyannote-cpp-node';
-import { writeFileSync } from 'node:fs';
+import { Pipeline } from 'pyannote-cpp-node';
 
-function toRTTM(result: DiarizationResult, filename: string = 'audio'): string {
-  const lines = result.segments.map(segment => {
-    // RTTM format: SPEAKER <file> <chnl> <tbeg> <tdur> <ortho> <stype> <name> <conf> <slat>
-    return [
-      'SPEAKER',
-      filename,
-      '1',
-      segment.start.toFixed(3),
-      segment.duration.toFixed(3),
-      '<NA>',
-      '<NA>',
-      segment.speaker,
-      '<NA>',
-      '<NA>',
-    ].join(' ');
-  });
+const pipeline = await Pipeline.load({
+  segModelPath: './models/segmentation.gguf',
+  embModelPath: './models/embedding.gguf',
+  pldaPath: './models/plda.gguf',
+  coremlPath: './models/embedding.mlpackage',
+  segCoremlPath: './models/segmentation.mlpackage',
+  whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
 
-  return lines.join('\n') + '\n';
-}
+  // Whisper runtime options
+  useGpu: true,
+  flashAttn: true,
+  gpuDevice: 0,
+  useCoreml: false,
 
-async function generateRTTM() {
-  const model = await Pyannote.load({
-    segModelPath: './models/segmentation.gguf',
-    embModelPath: './models/embedding.gguf',
-    pldaPath: './models/plda.gguf',
-    coremlPath: './models/embedding.mlpackage',
-    segCoremlPath: './models/segmentation.mlpackage',
-  });
+  // Decode strategy
+  nThreads: 8,
+  language: 'ko',
+  translate: false,
+  detectLanguage: false,
+  temperature: 0.0,
+  temperatureInc: 0.2,
+  noFallback: false,
+  beamSize: 5,
+  bestOf: 5,
 
-  const audio = loadWavFile('./audio.wav');
-  const result = await model.diarize(audio);
-
-  // Generate RTTM
-  const rttm = toRTTM(result, 'audio');
-  
-  // Write to file
-  writeFileSync('./output.rttm', rttm);
-  console.log('RTTM file written to output.rttm');
-
-  // Also print to console
-  console.log('\nRTTM output:');
-  console.log(rttm);
-
-  model.close();
-}
-
-generateRTTM();
+  // Thresholds and context
+  entropyThold: 2.4,
+  logprobThold: -1.0,
+  noSpeechThold: 0.6,
+  prompt: 'Meeting transcript with technical terminology.',
+  noContext: true,
+  suppressBlank: true,
+  suppressNst: false,
+});
 ```
 
-## Architecture
+## JSON Output Format
 
-The diarization pipeline consists of four main stages:
+The pipeline returns this JSON shape:
 
-### 1. Segmentation (SincNet + BiLSTM)
-
-The segmentation model processes 10-second audio windows and outputs 7-class powerset logits for 589 frames (approximately one frame every 17ms). The model architecture:
-
-- **SincNet**: Learnable sinc filter bank for feature extraction
-- **4-layer BiLSTM**: Bidirectional long short-term memory layers
-- **Linear classifier**: Projects to 7 powerset classes with log-softmax
-
-The 7 powerset classes represent all possible combinations of up to 3 simultaneous speakers:
-- Class 0: silence (no speakers)
-- Classes 1-3: single speakers
-- Classes 4-6: speaker overlaps
-
-### 2. Powerset Decoding
-
-Converts the 7-class powerset predictions into binary speaker activity for 3 local speakers per chunk. Each frame is decoded to indicate which of the 3 local speaker "slots" are active.
-
-### 3. Embedding Extraction (WeSpeaker ResNet34)
-
-For each active speaker in each chunk, the embedding model extracts a 256-dimensional speaker vector:
-
-- **Mel filterbank**: 80-bin log-mel spectrogram features
-- **ResNet34**: Deep residual network for speaker representation
-- **Output**: 256-dimensional L2-normalized embedding
-
-Silent speakers receive NaN embeddings, which are filtered before clustering.
-
-### 4. Clustering (PLDA + AHC + VBx)
-
-The final stage maps local speaker labels to global speaker identities:
-
-- **PLDA transformation**: Probabilistic Linear Discriminant Analysis projects embeddings from 256 to 128 dimensions
-- **Agglomerative Hierarchical Clustering (AHC)**: fastcluster implementation with O(n²) complexity, using centroid linkage and a distance threshold of 0.6
-- **VBx refinement**: Variational Bayes diarization with parameters FA=0.07, FB=0.8, maximum 20 iterations
-
-The clustering stage computes speaker centroids and assigns each embedding to the closest centroid while respecting the constraint that two local speakers in the same chunk cannot map to the same global speaker.
-
-### CoreML Acceleration
-
-Both neural networks run on Apple's CoreML framework, which automatically distributes computation across:
-
-- **Neural Engine**: Dedicated ML accelerator on Apple Silicon
-- **GPU**: Metal-accelerated operations
-- **CPU**: Fallback for unsupported operations
-
-CoreML models use Float16 computation for optimal performance while maintaining accuracy within acceptable bounds (cosine similarity > 0.999 vs Float32).
-
-### Streaming Architecture
-
-The streaming API uses a sliding 10-second window with a 1-second hop (9 seconds of overlap between consecutive chunks). Three data stores maintain the state:
-
-- **`audio_buffer`**: Sliding window (~10s, ~640 KB for 1 hour) — old samples are discarded
-- **`embeddings`**: Grows forever (~11 MB for 1 hour) — stores 3 × 256-dim vectors per chunk (NaN for silent speakers)
-- **`binarized`**: Grows forever (~25 MB for 1 hour) — stores 589 × 3 binary activity masks per chunk
-
-During reclustering, all accumulated embeddings are used to compute soft cluster assignments, and all binarized segmentations are used to reconstruct the global timeline. This is why the `embeddings` and `binarized` arrays must persist for the entire session.
-
-### Constants
-
-| Constant | Value | Description |
-|----------|-------|-------------|
-| SAMPLE_RATE | 16000 Hz | Audio sample rate |
-| CHUNK_SAMPLES | 160000 | 10-second window size |
-| STEP_SAMPLES | 16000 | 1-second hop between chunks |
-| FRAMES_PER_CHUNK | 589 | Segmentation output frames per 10s chunk |
-| NUM_LOCAL_SPEAKERS | 3 | Maximum speakers per chunk |
-| EMBEDDING_DIM | 256 | Speaker embedding dimension |
-| FBANK_NUM_BINS | 80 | Mel filterbank bins |
+```json
+{
+  "segments": [
+    {
+      "speaker": "SPEAKER_00",
+      "start": 0.497000,
+      "duration": 2.085000,
+      "text": "Hello world",
+      "words": [
+        {"text": " Hello", "start": 0.500000, "end": 0.800000},
+        {"text": " world", "start": 0.900000, "end": 1.200000}
+      ]
+    }
+  ]
+}
+```
 
 ## Audio Format Requirements
 
-The library expects raw PCM audio in a specific format:
+- Input must be `Float32Array`
+- Sample rate must be `16000` Hz
+- Audio must be mono
+- Recommended amplitude range: `[-1.0, 1.0]`
 
-- **Sample rate**: 16000 Hz (16 kHz) — **required**
-- **Channels**: Mono (single channel) — **required**
-- **Format**: `Float32Array` with values in the range **[-1.0, 1.0]**
+All API methods expect decoded PCM samples; file decoding/resampling is handled by the caller.
 
-The library does **not** handle audio decoding. You must provide raw PCM samples.
+## Architecture
 
-### Loading Audio Files
+The integrated pipeline runs in 7 stages:
 
-For WAV files, you can use the `loadWavFile` function from Example 1, or use third-party libraries:
-
-```bash
-npm install node-wav
-```
-
-```typescript
-import { read } from 'node-wav';
-import { readFileSync } from 'node:fs';
-
-const buffer = readFileSync('./audio.wav');
-const wav = read(buffer);
-
-// Convert to mono if stereo
-const mono = wav.channelData.length > 1
-  ? wav.channelData[0].map((v, i) => (v + wav.channelData[1][i]) / 2)
-  : wav.channelData[0];
-
-// Resample to 16kHz if needed (using a resampling library)
-// ...
-
-const audio = new Float32Array(mono);
-```
-
-For other audio formats (MP3, M4A, etc.), use ffmpeg to convert to 16kHz mono WAV first:
-
-```bash
-ffmpeg -i input.mp3 -ar 16000 -ac 1 -f f32le -acodec pcm_f32le - | \
-  node process.js
-```
-
-## Important Notes and Caveats
-
-### Platform Limitations
-
-- **macOS only**: The library requires CoreML for neural network inference. There is currently no fallback implementation for other platforms.
-- **No Linux/Windows support**: CoreML is exclusive to Apple platforms.
-
-### `recluster()` Mutates State
-
-The `recluster()` method overwrites the internal session state, specifically replacing the `embeddings` and chunk index arrays with filtered versions (excluding NaN embeddings from silent speakers). This means:
-
-- Calling `push()` after `recluster()` may produce incorrect results
-- Subsequent `recluster()` calls may not work as expected
-- The data structure assumes the original unfiltered layout (3 embeddings per chunk)
-
-**Best practice**: Use `recluster()` sparingly for live progress updates (e.g., every 30 seconds), or avoid it entirely and only call `finalize()` when the stream ends.
-
-### Operations Are Serialized
-
-Operations on a streaming session are serialized internally. Do not call `push()` while another `push()`, `recluster()`, or `finalize()` is in progress. Wait for the Promise to resolve before making the next call.
-
-### Resource Management
-
-- **Close sessions before models**: Always close streaming sessions before closing the parent model
-- **Idempotent close**: Both `model.close()` and `session.close()` are safe to call multiple times
-- **No reuse after close**: Once closed, models and sessions cannot be reused
-
-### Model Loading
-
-- **Path validation**: `Pyannote.load()` validates that all paths exist using `fs.accessSync()` before initialization
-- **CoreML compilation**: The CoreML framework compiles `.mlpackage` models internally on first load (typically fast, ~100ms)
-- **No explicit loading step**: Model weights are loaded synchronously in the constructor
-
-### Threading Model
-
-All heavy operations (`diarize`, `push`, `recluster`, `finalize`) run on libuv worker threads and never block the Node.js event loop. However, the operations do hold native locks internally, so concurrent operations on the same session are serialized.
-
-### Memory Usage
-
-For a 1-hour audio file:
-- `audio_buffer`: ~640 KB (sliding window)
-- `embeddings`: ~11 MB (grows throughout session)
-- `binarized`: ~25 MB (grows throughout session)
-- CoreML models: ~50 MB (loaded once per model)
-
-Total memory footprint: approximately 100 MB for a 1-hour streaming session.
+1. VAD silence filter (optional compression of long silence)
+2. Audio buffer (stream-safe FIFO with timestamp tracking)
+3. Segmentation (speech activity over rolling windows)
+4. Transcription (Whisper sentence + word timestamps)
+5. Alignment (segment-level speaker assignment by overlap)
+6. Finalize (flush + final recluster + final alignment)
+7. Callback/event emission (`segments` updates)
 
 ## Performance
 
-Measured on Apple M2 Pro with 16 GB RAM:
+- Diarization only: **39x real-time**
+- Integrated transcription + diarization: **~14.6x real-time**
+- 45-minute Korean meeting test (6 speakers): **2713s audio in 186s**
+- Alignment reduction: **701 Whisper segments -> 186 aligned speaker segments**
+- Speaker confusion rate: **2.55%**
 
-| Component | Time per Chunk | Notes |
-|-----------|----------------|-------|
-| Segmentation (CoreML) | ~12ms | 10-second audio window, 589 frames |
-| Embedding (CoreML) | ~13ms | Per speaker per chunk (up to 3 speakers) |
-| AHC Clustering | ~0.8s | 3000 embeddings (1000 chunks) |
-| VBx Refinement | ~1.2s | 20 iterations, 3000 embeddings |
-| **Full Pipeline (offline)** | **39x real-time** | 45-minute audio processed in 70 seconds |
+## Platform Support
 
-### Streaming Performance
-
-- **First chunk latency**: 10 seconds in normal mode (requires full window), or immediate in zero-latency mode
-- **Incremental latency**: ~30ms per 1-second push (after first chunk)
-- **Recluster latency**: ~2 seconds for 30 minutes of audio (~1800 embeddings)
-
-Streaming mode has higher per-chunk overhead due to the incremental nature but enables real-time applications.
-
-## Supported Platforms
-
-| Platform | Architecture | Status |
-|----------|--------------|--------|
-| macOS | arm64 (Apple Silicon) | ✅ Supported |
-| macOS | x64 (Intel) | 🔜 Planned |
-| Linux | any | ❌ Not supported (CoreML unavailable) |
-| Windows | any | ❌ Not supported (CoreML unavailable) |
-
-Intel macOS support is planned but not yet available. The CoreML dependency makes cross-platform support challenging without alternative inference backends.
+| Platform | Status |
+| --- | --- |
+| macOS arm64 (Apple Silicon) | Supported |
+| macOS x64 (Intel) | Supported |
+| Linux | Not supported |
+| Windows | Not supported |
 
 ## License
 
 MIT
-
----
-
-For issues, feature requests, or contributions, please visit the [GitHub repository](https://github.com/predict-woo/pyannote-ggml).
