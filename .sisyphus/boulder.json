@@ -1,6 +1,6 @@
 {
-  "active_plan": "/Users/andyye/dev/whisper-diarization.cpp/pyannote.cpp/.sisyphus/plans/whisper-diarization-integration.md",
-  "started_at": "2026-02-13T12:26:19.613Z",
-  "session_ids": ["ses_3a9292d0effe0rtp0luROwTeO1"],
-  "plan_name": "whisper-diarization-integration"
+  "active_plan": "/Users/andyye/dev/whisper-diarization.cpp/pyannote.cpp/.sisyphus/plans/node-bindings-pipeline.md",
+  "started_at": "2026-02-19T08:16:57.421Z",
+  "session_ids": ["ses_38b1de4c4ffen3wJF91Xq6r2bt"],
+  "plan_name": "node-bindings-pipeline"
 }
