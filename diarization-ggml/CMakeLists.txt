@@ -116,6 +116,25 @@ set_target_properties(test_aligner PROPERTIES
 add_library(transcription-lib INTERFACE)
 target_link_libraries(transcription-lib INTERFACE diarization-lib whisper)
 
+# Pipeline library (transcription + diarization pipeline)
+add_library(pipeline-lib STATIC
+    src/pipeline.cpp
+    src/silence_filter.cpp
+    src/audio_buffer.cpp
+    src/segment_detector.cpp
+    src/transcriber.cpp
+    src/aligner.cpp
+)
+
+target_include_directories(pipeline-lib PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(pipeline-lib PUBLIC
+    transcription-lib
+)
+
 add_executable(transcribe
     src/main_transcribe.cpp
     src/pipeline.cpp
