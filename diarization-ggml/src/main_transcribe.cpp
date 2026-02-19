@@ -468,7 +468,6 @@ int main(int argc, char** argv) {
         config.diarization.coreml_path = emb_coreml;
     }
     config.transcriber.whisper_model_path = whisper_model;
-    config.transcriber.whisper_coreml_path = nullptr;
     config.transcriber.n_threads = 4;
     config.transcriber.language = language;
     config.vad_model_path = vad_model;

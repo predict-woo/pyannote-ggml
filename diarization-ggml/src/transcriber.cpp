@@ -64,13 +64,44 @@ static void worker_loop(Transcriber* t) {
             audio.resize(MAX_SAMPLES);
         }
 
-        auto params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+        // Choose strategy based on beam_size
+        auto strategy = (t->config.beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
+        auto params = whisper_full_default_params(strategy);
+
+        // Pipeline-required overrides (never user-controllable)
         params.print_progress   = false;
         params.print_realtime   = false;
         params.print_timestamps = false;
-        params.token_timestamps = true;
+        params.token_timestamps = true;   // required for word-level alignment
+
+        // User-configurable params
         params.language         = t->config.language;
         params.n_threads        = t->config.n_threads;
+        params.translate        = t->config.translate;
+        params.detect_language  = t->config.detect_language;
+        if (t->config.detect_language) {
+            params.language = "auto";
+        }
+
+        // Sampling
+        params.temperature      = t->config.temperature;
+        params.temperature_inc  = t->config.no_fallback ? 0.0f : t->config.temperature_inc;
+        if (strategy == WHISPER_SAMPLING_BEAM_SEARCH) {
+            params.beam_search.beam_size = t->config.beam_size;
+        } else {
+            params.greedy.best_of = t->config.best_of;
+        }
+
+        // Thresholds
+        params.entropy_thold    = t->config.entropy_thold;
+        params.logprob_thold    = t->config.logprob_thold;
+        params.no_speech_thold  = t->config.no_speech_thold;
+
+        // Context
+        params.initial_prompt   = t->config.prompt;
+        params.no_context       = t->config.no_context;
+        params.suppress_blank   = t->config.suppress_blank;
+        params.suppress_nst     = t->config.suppress_nst;
 
         int ret = whisper_full(t->ctx, params, audio.data(), (int)audio.size());
         if (ret != 0) {
@@ -134,10 +165,13 @@ static void worker_loop(Transcriber* t) {
 
 Transcriber* transcriber_init(const TranscriberConfig& config) {
     auto cparams = whisper_context_default_params();
-    cparams.use_gpu = true;
-    cparams.flash_attn = true;
-    if (config.whisper_coreml_path) {
-        cparams.use_coreml = true;
+    cparams.use_gpu = config.use_gpu;
+    cparams.flash_attn = config.flash_attn;
+    cparams.gpu_device = config.gpu_device;
+    cparams.use_coreml = config.use_coreml;
+
+    if (config.no_prints) {
+        whisper_log_set([](enum ggml_log_level, const char*, void*){}, nullptr);
     }
 
     whisper_context* ctx = whisper_init_from_file_with_params(config.whisper_model_path, cparams);

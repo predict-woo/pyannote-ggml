@@ -85,7 +85,6 @@ int main(int argc, char* argv[]) {
 
     TranscriberConfig config;
     config.whisper_model_path = model_path;
-    config.whisper_coreml_path = nullptr;
     config.n_threads = 4;
     config.language = "en";
 
