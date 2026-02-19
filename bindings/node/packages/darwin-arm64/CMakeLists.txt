@@ -38,15 +38,24 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${DIARIZATION_ROOT}/diarization-ggml/src
     ${DIARIZATION_ROOT}/models/segmentation-ggml/src
     ${DIARIZATION_ROOT}/models/embedding-ggml/src
-    ${DIARIZATION_ROOT}/ggml/include
+    ${DIARIZATION_ROOT}/whisper.cpp/ggml/include
+    ${DIARIZATION_ROOT}/whisper.cpp/include
+    ${DIARIZATION_ROOT}/whisper.cpp/src
     ${DIARIZATION_BUILD}/kaldi-native-fbank/include
 )
 
 # Link static libraries from build-static
 target_link_libraries(${PROJECT_NAME} PRIVATE
+    # Integrated transcription+diarization pipeline
+    ${DIARIZATION_BUILD}/libpipeline-lib.a
+
     # Diarization pipeline
     ${DIARIZATION_BUILD}/libdiarization-lib.a
     
+    # Whisper
+    ${DIARIZATION_BUILD}/whisper.cpp/src/libwhisper.a
+    ${DIARIZATION_BUILD}/whisper.cpp/src/libwhisper.coreml.a
+
     # Segmentation
     ${DIARIZATION_BUILD}/segmentation-ggml/libsegmentation-core.a
     ${DIARIZATION_BUILD}/segmentation-ggml/libsegmentation-coreml.a
@@ -55,12 +64,12 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${DIARIZATION_BUILD}/embedding-ggml/libembedding-core.a
     ${DIARIZATION_BUILD}/embedding-ggml/libembedding-coreml.a
     
-    # GGML
-    ${DIARIZATION_BUILD}/ggml/src/libggml.a
-    ${DIARIZATION_BUILD}/ggml/src/libggml-base.a
-    ${DIARIZATION_BUILD}/ggml/src/libggml-cpu.a
-    ${DIARIZATION_BUILD}/ggml/src/ggml-metal/libggml-metal.a
-    ${DIARIZATION_BUILD}/ggml/src/ggml-blas/libggml-blas.a
+    # GGML (provided by whisper.cpp)
+    ${DIARIZATION_BUILD}/whisper.cpp/ggml/src/libggml.a
+    ${DIARIZATION_BUILD}/whisper.cpp/ggml/src/libggml-base.a
+    ${DIARIZATION_BUILD}/whisper.cpp/ggml/src/libggml-cpu.a
+    ${DIARIZATION_BUILD}/whisper.cpp/ggml/src/ggml-metal/libggml-metal.a
+    ${DIARIZATION_BUILD}/whisper.cpp/ggml/src/ggml-blas/libggml-blas.a
     
     # kaldi-native-fbank
     ${DIARIZATION_BUILD}/lib/libkaldi-native-fbank-core.a
@@ -83,6 +92,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     EMBEDDING_USE_COREML
     SEGMENTATION_USE_COREML
+    WHISPER_USE_COREML
     ACCELERATE_NEW_LAPACK
 )
 
