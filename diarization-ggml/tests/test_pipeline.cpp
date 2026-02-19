@@ -145,14 +145,24 @@ int main(int argc, char* argv[]) {
     struct CallbackCtx {
         std::vector<AlignedSegment> results;
         int count = 0;
+        int audio_received_count = 0;
+        size_t last_audio_size = 0;
+        size_t max_audio_size = 0;
     };
 
     CallbackCtx cb_ctx;
 
-    auto cb_fn = [](const std::vector<AlignedSegment>& segs, void* ud) {
+    auto cb_fn = [](const std::vector<AlignedSegment>& segs, const std::vector<float>& audio, void* ud) {
         auto* ctx = static_cast<CallbackCtx*>(ud);
         ctx->results = segs;
         ctx->count++;
+        if (!audio.empty()) {
+            ctx->audio_received_count++;
+            ctx->last_audio_size = audio.size();
+            if (audio.size() > ctx->max_audio_size) {
+                ctx->max_audio_size = audio.size();
+            }
+        }
     };
 
     PipelineState* state = pipeline_init(config, cb_fn, &cb_ctx);
@@ -163,9 +173,11 @@ int main(int argc, char* argv[]) {
     }
 
     constexpr int CHUNK_SIZE = 16000;
+    size_t total_vad_predictions = 0;
     for (size_t offset = 0; offset < audio.size(); offset += CHUNK_SIZE) {
         int n = static_cast<int>(std::min<size_t>(CHUNK_SIZE, audio.size() - offset));
-        pipeline_push(state, audio.data() + offset, n);
+        std::vector<bool> vad = pipeline_push(state, audio.data() + offset, n);
+        total_vad_predictions += vad.size();
     }
 
     pipeline_finalize(state);
@@ -173,6 +185,10 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "\n=== Pipeline Test Results ===\n");
     fprintf(stderr, "Callback invocations: %d\n", cb_ctx.count);
     fprintf(stderr, "Total aligned segments: %zu\n", cb_ctx.results.size());
+    fprintf(stderr, "Total VAD predictions from push: %zu\n", total_vad_predictions);
+    fprintf(stderr, "Callbacks with audio: %d\n", cb_ctx.audio_received_count);
+    fprintf(stderr, "Max callback audio size: %zu samples (%.2fs)\n",
+            cb_ctx.max_audio_size, static_cast<double>(cb_ctx.max_audio_size) / 16000.0);
 
     bool ok = true;
 
@@ -215,6 +231,29 @@ int main(int argc, char* argv[]) {
 
     if (total_words < 1) {
         fprintf(stderr, "FAIL: no words produced\n");
+        ok = false;
+    }
+
+    if (total_vad_predictions == 0) {
+        fprintf(stderr, "FAIL: pipeline_push returned no VAD predictions\n");
+        ok = false;
+    } else {
+        size_t expected_min = audio.size() / 512 / 2;
+        if (total_vad_predictions < expected_min) {
+            fprintf(stderr, "FAIL: too few VAD predictions: %zu (expected at least %zu)\n",
+                    total_vad_predictions, expected_min);
+            ok = false;
+        }
+    }
+
+    if (cb_ctx.audio_received_count == 0) {
+        fprintf(stderr, "FAIL: callback never received audio\n");
+        ok = false;
+    }
+
+    constexpr size_t MAX_WHISPER_SAMPLES = 30 * 16000;
+    if (cb_ctx.max_audio_size > MAX_WHISPER_SAMPLES) {
+        fprintf(stderr, "FAIL: callback audio exceeds 30s cap: %zu samples\n", cb_ctx.max_audio_size);
         ok = false;
     }
 

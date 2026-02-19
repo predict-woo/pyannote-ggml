@@ -440,7 +440,7 @@ int main(int argc, char** argv) {
         callback_ctx.file_id = audio_file_id_from_path(audio_path);
     }
 
-    auto callback = [](const std::vector<AlignedSegment>& segments, void* user_data) {
+    auto callback = [](const std::vector<AlignedSegment>& segments, const std::vector<float>& /*audio*/, void* user_data) {
         auto* ctx = static_cast<CallbackCtx*>(user_data);
         ctx->segments = segments;
 

@@ -10,6 +10,7 @@ constexpr int kSampleRate = 16000;
 
 struct FilterRun {
     std::vector<float> output;
+    std::vector<bool> vad_predictions;
     int flush_count_from_push = 0;
     int64_t first_flush_input_frame = -1;
 };
@@ -24,6 +25,8 @@ FilterRun run_filter(const std::vector<float>& input, int chunk_size) {
         const int n = static_cast<int>(std::min(static_cast<size_t>(chunk_size), input.size() - offset));
         SilenceFilterResult result = silence_filter_push(sf, input.data() + offset, n);
         run.output.insert(run.output.end(), result.audio.begin(), result.audio.end());
+        run.vad_predictions.insert(run.vad_predictions.end(),
+                                   result.vad_predictions.begin(), result.vad_predictions.end());
 
         pushed_frames += n;
         if (result.flush_signal) {
@@ -36,6 +39,8 @@ FilterRun run_filter(const std::vector<float>& input, int chunk_size) {
 
     SilenceFilterResult tail = silence_filter_flush(sf);
     run.output.insert(run.output.end(), tail.audio.begin(), tail.audio.end());
+    run.vad_predictions.insert(run.vad_predictions.end(),
+                               tail.vad_predictions.begin(), tail.vad_predictions.end());
     silence_filter_free(sf);
 
     return run;
@@ -90,6 +95,77 @@ int main() {
 
         FilterRun run = run_filter(alternating, 777);
         ok &= expect(run.output.size() == alternating.size(), "alternating 0.5s speech/silence should pass through");
+    }
+
+    // --- vad_predictions tests ---
+
+    {
+        constexpr size_t N = 156 * 512;
+        std::vector<float> speech(N, 0.5f);
+        FilterRun run = run_filter(speech, 512);
+        ok &= expect(run.vad_predictions.size() == N / 512,
+                     "vad_predictions count should equal num_samples / 512");
+        bool all_true = true;
+        for (bool v : run.vad_predictions) { if (!v) all_true = false; }
+        ok &= expect(all_true, "all-speech input should produce all-true vad_predictions");
+    }
+
+    {
+        constexpr size_t N = 156 * 512;
+        std::vector<float> silence(N, 0.0f);
+        FilterRun run = run_filter(silence, 512);
+        ok &= expect(run.vad_predictions.size() == N / 512,
+                     "vad_predictions count for silence should equal num_samples / 512");
+        bool all_false = true;
+        for (bool v : run.vad_predictions) { if (v) all_false = false; }
+        ok &= expect(all_false, "all-silence input should produce all-false vad_predictions");
+    }
+
+    {
+        constexpr size_t N = 62 * 512;
+        std::vector<float> speech(N, 0.5f);
+        FilterRun run = run_filter(speech, 256);
+        ok &= expect(run.vad_predictions.size() == N / 512,
+                     "sub-window pushes should still produce correct prediction count");
+    }
+
+    {
+        SilenceFilter* sf = silence_filter_init(nullptr, 0.5f);
+        std::vector<float> partial(300, 0.5f);
+        SilenceFilterResult r = silence_filter_push(sf, partial.data(), (int)partial.size());
+        ok &= expect(r.vad_predictions.empty(),
+                     "pushing < 512 samples should produce no predictions");
+
+        std::vector<float> rest(212, 0.5f);
+        SilenceFilterResult r2 = silence_filter_push(sf, rest.data(), (int)rest.size());
+        ok &= expect(r2.vad_predictions.size() == 1,
+                     "accumulating to 512 should produce exactly 1 prediction");
+        ok &= expect(r2.vad_predictions[0] == true,
+                     "speech samples should produce true prediction");
+        silence_filter_free(sf);
+    }
+
+    {
+        constexpr size_t WINDOWS = 62;
+        std::vector<float> mixed;
+        mixed.insert(mixed.end(), WINDOWS * 512, 0.5f);
+        mixed.insert(mixed.end(), WINDOWS * 512, 0.0f);
+        FilterRun run = run_filter(mixed, 512);
+
+        ok &= expect(run.vad_predictions.size() == WINDOWS * 2,
+                     "mixed input prediction count should match total windows");
+
+        bool speech_ok = true;
+        for (size_t i = 0; i < WINDOWS; ++i) {
+            if (!run.vad_predictions[i]) speech_ok = false;
+        }
+        ok &= expect(speech_ok, "speech portion should have true predictions");
+
+        bool silence_ok = true;
+        for (size_t i = WINDOWS; i < run.vad_predictions.size(); ++i) {
+            if (run.vad_predictions[i]) silence_ok = false;
+        }
+        ok &= expect(silence_ok, "silence portion should have false predictions");
     }
 
     if (!ok) {

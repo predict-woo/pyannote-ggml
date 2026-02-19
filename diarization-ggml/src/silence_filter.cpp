@@ -120,6 +120,8 @@ SilenceFilterResult silence_filter_push(SilenceFilter* sf, const float* samples,
         const float prob = detect_probability(&impl, frame, kVadWindowSize);
         const bool is_speech = prob >= impl.threshold;
 
+        result.vad_predictions.push_back(is_speech);
+
         if (is_speech) {
             process_speech_block(&impl, frame, kVadWindowSize, result.audio);
         } else {
@@ -146,6 +148,8 @@ SilenceFilterResult silence_filter_flush(SilenceFilter* sf) {
     if (!impl.pending.empty()) {
         const float prob = detect_probability(&impl, impl.pending.data(), static_cast<int>(impl.pending.size()));
         const bool is_speech = prob >= impl.threshold;
+
+        result.vad_predictions.push_back(is_speech);
 
         if (is_speech) {
             process_speech_block(&impl, impl.pending.data(), static_cast<int>(impl.pending.size()), result.audio);

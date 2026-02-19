@@ -37,6 +37,7 @@ struct PipelineState {
     std::vector<AlignedSegment> all_segments;
     std::vector<TranscribeSegment> all_transcribe_segments;
     std::deque<PendingSubmission> submission_queue;
+    std::vector<float> last_submitted_audio;
 
     whisper_vad_context* vad_ctx;
 };
@@ -51,6 +52,7 @@ static void try_submit_next(PipelineState* state) {
             static_cast<double>(sub.audio.size()) / SAMPLE_RATE,
             state->submission_queue.size());
 
+    state->last_submitted_audio = sub.audio;
     transcriber_submit(state->transcriber, sub.audio.data(), (int)sub.audio.size(), sub.start_time);
     state->whisper_in_flight = true;
 }
@@ -94,7 +96,7 @@ static void handle_whisper_result(PipelineState* state, const TranscribeResult& 
             state->all_segments.size(), state->all_transcribe_segments.size());
 
     if (state->callback) {
-        state->callback(state->all_segments, state->user_data);
+        state->callback(state->all_segments, state->last_submitted_audio, state->user_data);
     }
 }
 
@@ -154,8 +156,8 @@ PipelineState* pipeline_init(const PipelineConfig& config, pipeline_callback cb,
     return state;
 }
 
-void pipeline_push(PipelineState* state, const float* samples, int n_samples) {
-    if (!state || !samples || n_samples <= 0) return;
+std::vector<bool> pipeline_push(PipelineState* state, const float* samples, int n_samples) {
+    if (!state || !samples || n_samples <= 0) return {};
 
     SilenceFilterResult sf_result = silence_filter_push(state->silence_filter, samples, n_samples);
 
@@ -198,6 +200,8 @@ void pipeline_push(PipelineState* state, const float* samples, int n_samples) {
         state->whisper_in_flight = false;
         try_submit_next(state);
     }
+
+    return sf_result.vad_predictions;
 }
 
 void pipeline_finalize(PipelineState* state) {
@@ -247,7 +251,7 @@ void pipeline_finalize(PipelineState* state) {
         fprintf(stderr, "[pipeline] finalize: final re-alignment produced %zu segments from %zu transcribe segments\n",
                 state->all_segments.size(), state->all_transcribe_segments.size());
         if (state->callback) {
-            state->callback(state->all_segments, state->user_data);
+            state->callback(state->all_segments, {}, state->user_data);
         }
     }
 

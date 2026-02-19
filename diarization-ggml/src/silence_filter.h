@@ -7,6 +7,7 @@ struct whisper_vad_context;
 struct SilenceFilterResult {
     std::vector<float> audio;
     bool flush_signal;
+    std::vector<bool> vad_predictions;  // one per 512-sample window processed
 };
 
 struct SilenceFilter;
