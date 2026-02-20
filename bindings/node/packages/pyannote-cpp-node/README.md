@@ -3,7 +3,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
-Node.js native bindings for integrated Whisper transcription + speaker diarization with speaker-labeled, word-level output.
+Node.js native bindings for integrated Whisper transcription + speaker diarization with speaker-labeled segment output.
 
 ## Overview
 
@@ -14,14 +14,13 @@ Given 16 kHz mono PCM audio (`Float32Array`), it produces cumulative and final t
 - speaker label (`SPEAKER_00`, `SPEAKER_01`, ...)
 - segment start/duration in seconds
 - segment text
-- per-word timestamps
 
 The API supports both one-shot processing (`transcribe`) and incremental streaming (`createSession` + `push`/`finalize`). All heavy operations are asynchronous and run on libuv worker threads.
 
 ## Features
 
 - Integrated transcription + diarization in one pipeline
-- Speaker-labeled, word-level transcript output
+- Speaker-labeled transcript segments with sentence-level text
 - One-shot and streaming APIs with the same output schema
 - Incremental `segments` events for live applications
 - Deterministic output for the same audio/models/config
@@ -162,108 +161,104 @@ session.on('segments', (segments: AlignedSegment[], audio: Float32Array) => {
 
 ```typescript
 export interface ModelConfig {
-  /** Path to segmentation GGUF model file. */
+  // === Required Model Paths ===
+  /** Path to segmentation GGUF model */
   segModelPath: string;
 
-  /** Path to embedding GGUF model file. */
+  /** Path to embedding GGUF model */
   embModelPath: string;
 
-  /** Path to PLDA GGUF model file. */
+  /** Path to PLDA GGUF model */
   pldaPath: string;
 
-  /** Path to embedding CoreML .mlpackage directory. */
+  /** Path to embedding CoreML .mlpackage directory */
   coremlPath: string;
 
-  /** Path to segmentation CoreML .mlpackage directory. */
+  /** Path to segmentation CoreML .mlpackage directory */
   segCoremlPath: string;
 
-  /** Path to Whisper GGUF model file. */
+  /** Path to Whisper GGUF model */
   whisperModelPath: string;
 
-  /** Optional path to Silero VAD model file; enables silence compression. */
+  // === Optional Model Paths ===
+  /** Path to Silero VAD model (optional, enables silence compression) */
   vadModelPath?: string;
 
-  /** Enable GPU for Whisper. Default: true. */
+  // === Whisper Context Options (model loading) ===
+  /** Enable GPU acceleration (default: true) */
   useGpu?: boolean;
 
-  /** Enable flash attention when supported. Default: true. */
+  /** Enable Flash Attention (default: true) */
   flashAttn?: boolean;
 
-  /** GPU device index. Default: 0. */
+  /** GPU device index (default: 0) */
   gpuDevice?: number;
 
   /**
-   * Enable Whisper CoreML encoder.
-   * Default: false.
-   * Requires a matching `-encoder.mlmodelc` next to the GGUF model.
+   * Enable CoreML acceleration for Whisper encoder on macOS (default: false).
+   * The CoreML model must be placed next to the GGUF model with naming convention:
+   * e.g., ggml-base.en.bin -> ggml-base.en-encoder.mlmodelc/
    */
   useCoreml?: boolean;
 
-  /** Suppress Whisper native logs. Default: false. */
+  /** Suppress whisper.cpp log output (default: false) */
   noPrints?: boolean;
 
-  /** Number of decode threads. Default: 4. */
+  // === Whisper Decode Options ===
+  /** Number of threads for Whisper inference (default: 4) */
   nThreads?: number;
 
-  /** Language code for transcription. Default: 'en'. Omit for auto-detect behavior with model settings. */
+  /** Language code (e.g., 'en', 'zh'). Omit for auto-detect. (default: 'en') */
   language?: string;
 
-  /** Translate to English. Default: false. */
+  /** Translate non-English speech to English (default: false) */
   translate?: boolean;
 
-  /** Force language detection pass. Default: false. */
+  /** Auto-detect spoken language. Overrides 'language' when true. (default: false) */
   detectLanguage?: boolean;
 
-  /** Base sampling temperature. Default: 0.0 (greedy). */
+  // === Sampling ===
+  /** Sampling temperature. 0.0 = greedy deterministic. (default: 0.0) */
   temperature?: number;
 
-  /** Temperature increment for fallback sampling. Default: 0.2. */
+  /** Temperature increment for fallback retries (default: 0.2) */
   temperatureInc?: number;
 
-  /** Disable temperature fallback ladder. Default: false. */
+  /** Disable temperature fallback. If true, temperatureInc is ignored. (default: false) */
   noFallback?: boolean;
 
-  /** Beam size. Default: -1 (greedy with best_of). */
+  /** Beam search size. -1 uses greedy decoding. >1 enables beam search. (default: -1) */
   beamSize?: number;
 
-  /** Number of candidates in best-of sampling. Default: 5. */
+  /** Best-of-N sampling candidates for greedy decoding (default: 5) */
   bestOf?: number;
 
-  /** Compression/entropy threshold. Default: 2.4. */
+  // === Thresholds ===
+  /** Entropy threshold for decoder fallback (default: 2.4) */
   entropyThold?: number;
 
-  /** Average logprob threshold. Default: -1.0. */
+  /** Log probability threshold for decoder fallback (default: -1.0) */
   logprobThold?: number;
 
-  /** No-speech probability threshold. Default: 0.6. */
+  /** No-speech probability threshold (default: 0.6) */
   noSpeechThold?: number;
 
-  /** Optional initial prompt text. Default: undefined. */
+  // === Context ===
+  /** Initial prompt text to condition the decoder (default: none) */
   prompt?: string;
 
-  /** Disable context carry-over between decode windows. Default: true. */
+  /** Don't use previous segment as context for next segment (default: true) */
   noContext?: boolean;
 
-  /** Suppress blank tokens. Default: true. */
+  /** Suppress blank outputs at the beginning of segments (default: true) */
   suppressBlank?: boolean;
 
-  /** Suppress non-speech tokens. Default: false. */
+  /** Suppress non-speech tokens (default: false) */
   suppressNst?: boolean;
 }
 
-export interface AlignedWord {
-  /** Word text (may include leading space from Whisper tokenization). */
-  text: string;
-
-  /** Word start time in seconds. */
-  start: number;
-
-  /** Word end time in seconds. */
-  end: number;
-}
-
 export interface AlignedSegment {
-  /** Global speaker label (for example, SPEAKER_00). */
+  /** Global speaker label (e.g., SPEAKER_00). */
   speaker: string;
 
   /** Segment start time in seconds. */
@@ -272,11 +267,8 @@ export interface AlignedSegment {
   /** Segment duration in seconds. */
   duration: number;
 
-  /** Segment text (concatenated from words). */
+  /** Transcribed text for this segment. */
   text: string;
-
-  /** Word-level timestamps for the segment. */
-  words: AlignedWord[];
 }
 
 export interface TranscriptionResult {
@@ -407,11 +399,7 @@ The pipeline returns this JSON shape:
       "speaker": "SPEAKER_00",
       "start": 0.497000,
       "duration": 2.085000,
-      "text": "Hello world",
-      "words": [
-        {"text": " Hello", "start": 0.500000, "end": 0.800000},
-        {"text": " world", "start": 0.900000, "end": 1.200000}
-      ]
+      "text": "Hello world"
     }
   ]
 }
@@ -433,7 +421,7 @@ The integrated pipeline runs in 7 stages:
 1. VAD silence filter (optional compression of long silence)
 2. Audio buffer (stream-safe FIFO with timestamp tracking)
 3. Segmentation (speech activity over rolling windows)
-4. Transcription (Whisper sentence + word timestamps)
+4. Transcription (Whisper sentence-level segments)
 5. Alignment (segment-level speaker assignment by overlap)
 6. Finalize (flush + final recluster + final alignment)
 7. Callback/event emission (`segments` updates)
@@ -443,7 +431,7 @@ The integrated pipeline runs in 7 stages:
 - Diarization only: **39x real-time**
 - Integrated transcription + diarization: **~14.6x real-time**
 - 45-minute Korean meeting test (6 speakers): **2713s audio in 186s**
-- Alignment reduction: **701 Whisper segments -> 186 aligned speaker segments**
+- Each Whisper segment maps 1:1 to a speaker-labeled segment (no merging)
 - Speaker confusion rate: **2.55%**
 
 ## Platform Support
