@@ -156,24 +156,52 @@ describe('Streaming session', () => {
     const session = model.createSession();
     const audio = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
 
-    const receivedEvents: { segments: AlignedSegment[]; audio: Float32Array }[] = [];
-    session.on('segments', (segments: AlignedSegment[], audioData: Float32Array) => {
-      receivedEvents.push({ segments, audio: audioData });
+    const receivedSegments: AlignedSegment[][] = [];
+    session.on('segments', (segments: AlignedSegment[]) => {
+      receivedSegments.push(segments);
     });
 
     const CHUNK_SIZE = 16000;
-    // Push all audio
     for (let offset = 0; offset < audio.length; offset += CHUNK_SIZE) {
       const end = Math.min(offset + CHUNK_SIZE, audio.length);
       await session.push(audio.slice(offset, end));
     }
 
     const result = await session.finalize();
-
-    // Should have received at least one segments event
-    // (may not always fire during push for short audio, but finalize should trigger it)
     expect(result.segments).toBeDefined();
     expect(result.segments.length).toBeGreaterThan(0);
+
+    session.close();
+    model.close();
+  });
+
+  it('emits audio events with Float32Array chunks', async () => {
+    const model = await Pipeline.load(config);
+    const session = model.createSession();
+    const audio = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
+
+    const audioChunks: Float32Array[] = [];
+    session.on('audio', (chunk: Float32Array) => {
+      audioChunks.push(chunk);
+    });
+
+    const CHUNK_SIZE = 16000;
+    for (let offset = 0; offset < audio.length; offset += CHUNK_SIZE) {
+      const end = Math.min(offset + CHUNK_SIZE, audio.length);
+      await session.push(audio.slice(offset, end));
+    }
+
+    await session.finalize();
+
+    expect(audioChunks.length).toBeGreaterThan(0);
+    for (const chunk of audioChunks) {
+      expect(chunk).toBeInstanceOf(Float32Array);
+      expect(chunk.length).toBeGreaterThan(0);
+    }
+
+    const totalSamples = audioChunks.reduce((sum, c) => sum + c.length, 0);
+    expect(totalSamples).toBeGreaterThan(audio.length * 0.9);
+    expect(totalSamples).toBeLessThanOrEqual(audio.length);
 
     session.close();
     model.close();

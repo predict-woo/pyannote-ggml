@@ -422,7 +422,7 @@ int main(int argc, char** argv) {
         callback_ctx.file_id = audio_file_id_from_path(audio_path);
     }
 
-    auto callback = [](const std::vector<AlignedSegment>& segments, const std::vector<float>& /*audio*/, void* user_data) {
+    auto callback = [](const std::vector<AlignedSegment>& segments, void* user_data) {
         auto* ctx = static_cast<CallbackCtx*>(user_data);
         ctx->segments = segments;
 
@@ -456,7 +456,7 @@ int main(int argc, char** argv) {
 
     const auto t0 = std::chrono::steady_clock::now();
 
-    PipelineState* state = pipeline_init(config, callback, &callback_ctx);
+    PipelineState* state = pipeline_init(config, callback, nullptr, &callback_ctx);
     if (!state) {
         fprintf(stderr, "Error: pipeline initialization failed\n");
         return 1;

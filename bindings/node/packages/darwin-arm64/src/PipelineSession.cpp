@@ -8,6 +8,9 @@ Napi::FunctionReference PipelineSession::constructor;
 
 struct TSFNCallbackData {
     std::vector<AlignedSegment> segments;
+};
+
+struct AudioCallbackData {
     std::vector<float> audio;
 };
 
@@ -47,15 +50,16 @@ PipelineSession::PipelineSession(const Napi::CallbackInfo& info)
     : Napi::ObjectWrap<PipelineSession>(info) {
     Napi::Env env = info.Env();
 
-    if (info.Length() < 2 || !info[0].IsExternal() || !info[1].IsFunction()) {
+    if (info.Length() < 3 || !info[0].IsExternal() || !info[1].IsFunction() || !info[2].IsFunction()) {
         Napi::TypeError::New(env,
-            "PipelineSession cannot be constructed directly. Use model.createSession(callback)")
+            "PipelineSession cannot be constructed directly. Use model.createSession(segmentsCb, audioCb)")
             .ThrowAsJavaScriptException();
         return;
     }
 
     PipelineModel* model = info[0].As<Napi::External<PipelineModel>>().Data();
-    Napi::Function callback = info[1].As<Napi::Function>();
+    Napi::Function segmentsCallback = info[1].As<Napi::Function>();
+    Napi::Function audioCallback = info[2].As<Napi::Function>();
 
     if (model->IsClosed()) {
         Napi::Error::New(env, "Model is closed").ThrowAsJavaScriptException();
@@ -98,15 +102,8 @@ PipelineSession::PipelineSession(const Napi::CallbackInfo& info)
     suppress_blank_ = srcConfig.transcriber.suppress_blank;
     suppress_nst_ = srcConfig.transcriber.suppress_nst;
 
-    js_callback_ = Napi::Persistent(callback);
-
-    tsfn_ = Napi::ThreadSafeFunction::New(
-        env,
-        callback,
-        "PipelineCallback",
-        0,
-        1
-    );
+    tsfn_ = Napi::ThreadSafeFunction::New(env, segmentsCallback, "SegmentsCallback", 0, 1);
+    audio_tsfn_ = Napi::ThreadSafeFunction::New(env, audioCallback, "AudioCallback", 0, 1);
 
     PipelineConfig config{};
     config.diarization.seg_model_path = seg_model_path_;
@@ -140,10 +137,12 @@ PipelineSession::PipelineSession(const Napi::CallbackInfo& info)
     config.transcriber.suppress_blank = suppress_blank_;
     config.transcriber.suppress_nst = suppress_nst_;
 
-    state_ = pipeline_init(config, pipeline_cb, this);
+    state_ = pipeline_init(config, pipeline_cb, audio_cb, this);
     if (!state_) {
         tsfn_.Release();
         tsfn_released_ = true;
+        audio_tsfn_.Release();
+        audio_tsfn_released_ = true;
         Napi::Error::New(env, "Failed to initialize pipeline state")
             .ThrowAsJavaScriptException();
         return;
@@ -163,11 +162,14 @@ void PipelineSession::Cleanup() {
         tsfn_.Release();
         tsfn_released_ = true;
     }
+    if (!audio_tsfn_released_) {
+        audio_tsfn_.Release();
+        audio_tsfn_released_ = true;
+    }
     closed_ = true;
 }
 
 void PipelineSession::pipeline_cb(const std::vector<AlignedSegment>& segments,
-                                   const std::vector<float>& audio,
                                    void* user_data) {
     auto* self = static_cast<PipelineSession*>(user_data);
 
@@ -176,23 +178,36 @@ void PipelineSession::pipeline_cb(const std::vector<AlignedSegment>& segments,
         self->last_segments_ = segments;
     }
 
-    auto* data = new TSFNCallbackData{segments, audio};
+    auto* data = new TSFNCallbackData{segments};
 
     auto status = self->tsfn_.NonBlockingCall(data,
         [](Napi::Env env, Napi::Function jsCallback, TSFNCallbackData* cbData) {
             Napi::Array segmentsArr = MarshalSegments(env, cbData->segments);
+            jsCallback.Call({segmentsArr});
+            delete cbData;
+        });
 
-            Napi::ArrayBuffer audioBuf = Napi::ArrayBuffer::New(
+    if (status != napi_ok) {
+        delete data;
+    }
+}
+
+void PipelineSession::audio_cb(const float* samples, int n_samples, void* user_data) {
+    auto* self = static_cast<PipelineSession*>(user_data);
+
+    auto* data = new AudioCallbackData{{samples, samples + n_samples}};
+
+    auto status = self->audio_tsfn_.NonBlockingCall(data,
+        [](Napi::Env env, Napi::Function jsCallback, AudioCallbackData* cbData) {
+            Napi::ArrayBuffer buf = Napi::ArrayBuffer::New(
                 env, cbData->audio.size() * sizeof(float));
             if (!cbData->audio.empty()) {
-                memcpy(audioBuf.Data(), cbData->audio.data(),
+                memcpy(buf.Data(), cbData->audio.data(),
                        cbData->audio.size() * sizeof(float));
             }
-            Napi::Float32Array audioArr = Napi::Float32Array::New(
-                env, cbData->audio.size(), audioBuf, 0);
-
-            jsCallback.Call({segmentsArr, audioArr});
-
+            Napi::Float32Array arr = Napi::Float32Array::New(
+                env, cbData->audio.size(), buf, 0);
+            jsCallback.Call({arr});
             delete cbData;
         });
 

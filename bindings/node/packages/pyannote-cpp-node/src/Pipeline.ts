@@ -37,9 +37,10 @@ export class Pipeline {
   createSession(): PipelineSession {
     if (this.native.isClosed) throw new Error('Pipeline is closed');
     const session = new PipelineSession();
-    const nativeSession = this.native.createSession((segments: any[], audio: Float32Array) => {
-      session._onNativeCallback(segments, audio);
-    });
+    const nativeSession = this.native.createSession(
+      (segments: any[]) => session._onSegmentsCallback(segments),
+      (audio: Float32Array) => session._onAudioCallback(audio),
+    );
     session._setNative(nativeSession);
     return session;
   }

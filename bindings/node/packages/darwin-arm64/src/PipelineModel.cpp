@@ -216,8 +216,8 @@ Napi::Value PipelineModel::CreateSession(const Napi::CallbackInfo& info) {
         return env.Undefined();
     }
 
-    if (info.Length() < 1 || !info[0].IsFunction()) {
-        Napi::TypeError::New(env, "Expected callback function argument")
+    if (info.Length() < 2 || !info[0].IsFunction() || !info[1].IsFunction()) {
+        Napi::TypeError::New(env, "Expected two callback function arguments (segments, audio)")
             .ThrowAsJavaScriptException();
         return env.Undefined();
     }
@@ -225,7 +225,7 @@ Napi::Value PipelineModel::CreateSession(const Napi::CallbackInfo& info) {
     Napi::External<PipelineModel> modelExt =
         Napi::External<PipelineModel>::New(env, this);
 
-    return PipelineSession::constructor.New({ modelExt, info[0] });
+    return PipelineSession::constructor.New({ modelExt, info[0], info[1] });
 }
 
 Napi::Value PipelineModel::Close(const Napi::CallbackInfo& info) {

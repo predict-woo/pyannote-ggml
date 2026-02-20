@@ -31,13 +31,12 @@ struct PipelineState {
     bool whisper_in_flight;
 
     pipeline_callback callback;
+    pipeline_audio_callback audio_callback;
     void* user_data;
 
     std::vector<AlignedSegment> all_segments;
     std::vector<TranscribeSegment> all_transcribe_segments;
     std::deque<PendingSubmission> submission_queue;
-    std::vector<float> last_submitted_audio;
-    std::vector<float> all_audio;  // accumulated audio from all submissions
 
     whisper_vad_context* vad_ctx;
 };
@@ -52,7 +51,6 @@ static void try_submit_next(PipelineState* state) {
             static_cast<double>(sub.audio.size()) / SAMPLE_RATE,
             state->submission_queue.size());
 
-    state->last_submitted_audio = sub.audio;
     transcriber_submit(state->transcriber, sub.audio.data(), (int)sub.audio.size(), sub.start_time);
     state->whisper_in_flight = true;
 }
@@ -73,8 +71,6 @@ static void enqueue_audio_chunk(PipelineState* state, int64_t abs_start, int64_t
             start_time,
             state->submission_queue.size() + 1);
 
-    state->all_audio.insert(state->all_audio.end(), audio.begin(), audio.end());
-
     state->submission_queue.push_back({std::move(audio), start_time});
     try_submit_next(state);
 }
@@ -94,13 +90,14 @@ static void handle_whisper_result(PipelineState* state, const TranscribeResult& 
             state->all_segments.size(), state->all_transcribe_segments.size());
 
     if (state->callback) {
-        state->callback(state->all_segments, state->last_submitted_audio, state->user_data);
+        state->callback(state->all_segments, state->user_data);
     }
 }
 
-PipelineState* pipeline_init(const PipelineConfig& config, pipeline_callback cb, void* user_data) {
+PipelineState* pipeline_init(const PipelineConfig& config, pipeline_callback cb, pipeline_audio_callback audio_cb, void* user_data) {
     auto* state = new PipelineState();
     state->callback = cb;
+    state->audio_callback = audio_cb;
     state->user_data = user_data;
     state->buffer_start_time = 0.0;
     state->whisper_in_flight = false;
@@ -159,6 +156,11 @@ std::vector<bool> pipeline_push(PipelineState* state, const float* samples, int 
 
     SilenceFilterResult sf_result = silence_filter_push(state->silence_filter, samples, n_samples);
 
+    // Fire audio callback with silence-filtered audio
+    if (state->audio_callback && !sf_result.audio.empty()) {
+        state->audio_callback(sf_result.audio.data(), (int)sf_result.audio.size(), state->user_data);
+    }
+
     bool need_flush = sf_result.flush_signal;
 
     if (!sf_result.audio.empty()) {
@@ -207,9 +209,13 @@ void pipeline_finalize(PipelineState* state) {
 
     fprintf(stderr, "[pipeline] finalize: Finalizing...\n");
 
-    // Flush silence filter into diarization
     SilenceFilterResult sf_flush = silence_filter_flush(state->silence_filter);
     fprintf(stderr, "[pipeline] finalize: silence_filter_flush emitted %zu samples\n", sf_flush.audio.size());
+
+    if (state->audio_callback && !sf_flush.audio.empty()) {
+        state->audio_callback(sf_flush.audio.data(), (int)sf_flush.audio.size(), state->user_data);
+    }
+
     if (!sf_flush.audio.empty()) {
         state->audio_buffer.enqueue(sf_flush.audio.data(), (int)sf_flush.audio.size());
         std::vector<VADChunk> vad_chunks = streaming_push(
@@ -249,7 +255,7 @@ void pipeline_finalize(PipelineState* state) {
         fprintf(stderr, "[pipeline] finalize: final re-alignment produced %zu segments from %zu transcribe segments\n",
                 state->all_segments.size(), state->all_transcribe_segments.size());
         if (state->callback) {
-            state->callback(state->all_segments, state->all_audio, state->user_data);
+            state->callback(state->all_segments, state->user_data);
         }
     }
 

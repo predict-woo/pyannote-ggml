@@ -23,7 +23,6 @@ public:
 
 private:
     static void OnPipelineCallback(const std::vector<AlignedSegment>& segments,
-                                   const std::vector<float>& audio,
                                    void* user_data);
 
     PipelineModel* model_;

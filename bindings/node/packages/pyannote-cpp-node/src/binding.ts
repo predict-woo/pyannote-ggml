@@ -6,7 +6,10 @@ const require = createRequire(import.meta.url);
 
 export interface NativePipelineModel {
   transcribe(audio: Float32Array): Promise<TranscriptionResult>;
-  createSession(callback: (segments: any[], audio: Float32Array) => void): NativePipelineSession;
+  createSession(
+    segmentsCb: (segments: any[]) => void,
+    audioCb: (audio: Float32Array) => void,
+  ): NativePipelineSession;
   close(): void;
   isClosed: boolean;
 }

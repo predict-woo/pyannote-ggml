@@ -4,7 +4,8 @@ import type { NativePipelineSession } from './binding.js';
 import type { AlignedSegment, TranscriptionResult } from './types.js';
 
 export interface PipelineSessionEvents {
-  segments: [segments: AlignedSegment[], audio: Float32Array];
+  segments: [segments: AlignedSegment[]];
+  audio: [audio: Float32Array];
   error: [error: Error];
 }
 
@@ -19,9 +20,12 @@ export class PipelineSession extends EventEmitter {
     this.native = native;
   }
 
-  _onNativeCallback(segments: any[], audio: Float32Array): void {
-    const typedSegments: AlignedSegment[] = segments as AlignedSegment[];
-    this.emit('segments', typedSegments, audio);
+  _onSegmentsCallback(segments: any[]): void {
+    this.emit('segments', segments as AlignedSegment[]);
+  }
+
+  _onAudioCallback(audio: Float32Array): void {
+    this.emit('audio', audio);
   }
 
   async push(audio: Float32Array): Promise<boolean[]> {

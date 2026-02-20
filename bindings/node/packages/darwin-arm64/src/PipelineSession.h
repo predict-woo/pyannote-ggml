@@ -31,10 +31,10 @@ private:
 
     void Cleanup();
 
-    // Static callback for pipeline_init
+    // Static callbacks for pipeline_init
     static void pipeline_cb(const std::vector<AlignedSegment>& segments,
-                            const std::vector<float>& audio,
                             void* user_data);
+    static void audio_cb(const float* samples, int n_samples, void* user_data);
 
     std::string seg_model_path_;
     std::string emb_model_path_;
@@ -69,12 +69,12 @@ private:
 
     PipelineState* state_ = nullptr;
     Napi::ThreadSafeFunction tsfn_;
-    Napi::FunctionReference js_callback_;
+    Napi::ThreadSafeFunction audio_tsfn_;
     bool closed_ = false;
     bool busy_ = false;
     bool tsfn_released_ = false;
+    bool audio_tsfn_released_ = false;
 
-    // Last segments for finalize result
     std::vector<AlignedSegment> last_segments_;
     std::mutex segments_mutex_;
 };

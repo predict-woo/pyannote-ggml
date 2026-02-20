@@ -146,26 +146,24 @@ int main(int argc, char* argv[]) {
         std::vector<AlignedSegment> results;
         int count = 0;
         int audio_received_count = 0;
-        size_t last_audio_size = 0;
-        size_t max_audio_size = 0;
+        size_t total_audio_samples = 0;
     };
 
     CallbackCtx cb_ctx;
 
-    auto cb_fn = [](const std::vector<AlignedSegment>& segs, const std::vector<float>& audio, void* ud) {
+    auto cb_fn = [](const std::vector<AlignedSegment>& segs, void* ud) {
         auto* ctx = static_cast<CallbackCtx*>(ud);
         ctx->results = segs;
         ctx->count++;
-        if (!audio.empty()) {
-            ctx->audio_received_count++;
-            ctx->last_audio_size = audio.size();
-            if (audio.size() > ctx->max_audio_size) {
-                ctx->max_audio_size = audio.size();
-            }
-        }
     };
 
-    PipelineState* state = pipeline_init(config, cb_fn, &cb_ctx);
+    auto audio_cb_fn = [](const float* /*samples*/, int n_samples, void* ud) {
+        auto* ctx = static_cast<CallbackCtx*>(ud);
+        ctx->audio_received_count++;
+        ctx->total_audio_samples += static_cast<size_t>(n_samples);
+    };
+
+    PipelineState* state = pipeline_init(config, cb_fn, audio_cb_fn, &cb_ctx);
 
     if (!state) {
         fprintf(stderr, "FAIL: pipeline_init returned nullptr\n");
@@ -186,9 +184,9 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "Callback invocations: %d\n", cb_ctx.count);
     fprintf(stderr, "Total aligned segments: %zu\n", cb_ctx.results.size());
     fprintf(stderr, "Total VAD predictions from push: %zu\n", total_vad_predictions);
-    fprintf(stderr, "Callbacks with audio: %d\n", cb_ctx.audio_received_count);
-    fprintf(stderr, "Max callback audio size: %zu samples (%.2fs)\n",
-            cb_ctx.max_audio_size, static_cast<double>(cb_ctx.max_audio_size) / 16000.0);
+    fprintf(stderr, "Audio callback invocations: %d\n", cb_ctx.audio_received_count);
+    fprintf(stderr, "Total audio samples received: %zu (%.2fs)\n",
+            cb_ctx.total_audio_samples, static_cast<double>(cb_ctx.total_audio_samples) / 16000.0);
 
     bool ok = true;
 
@@ -234,13 +232,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (cb_ctx.audio_received_count == 0) {
-        fprintf(stderr, "FAIL: callback never received audio\n");
-        ok = false;
-    }
-
-    constexpr size_t MAX_WHISPER_SAMPLES = 30 * 16000;
-    if (cb_ctx.max_audio_size > MAX_WHISPER_SAMPLES) {
-        fprintf(stderr, "FAIL: callback audio exceeds 30s cap: %zu samples\n", cb_ctx.max_audio_size);
+        fprintf(stderr, "FAIL: audio callback never invoked\n");
         ok = false;
     }
 

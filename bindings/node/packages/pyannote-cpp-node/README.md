@@ -22,7 +22,7 @@ The API supports both one-shot processing (`transcribe`) and incremental streami
 - Integrated transcription + diarization in one pipeline
 - Speaker-labeled transcript segments with sentence-level text
 - One-shot and streaming APIs with the same output schema
-- Incremental `segments` events for live applications
+- Incremental `segments` events plus separate real-time `audio` chunk streaming
 - Deterministic output for the same audio/models/config
 - CoreML-accelerated inference on macOS
 - TypeScript-first API with complete type definitions
@@ -105,6 +105,7 @@ Runs one-shot transcription + diarization on the full audio buffer.
 #### `createSession(): PipelineSession`
 
 Creates an independent streaming session for incremental processing.
+This method takes no arguments; native segment/audio callbacks are wired internally.
 
 #### `close(): void`
 
@@ -122,7 +123,18 @@ class PipelineSession extends EventEmitter {
   async finalize(): Promise<TranscriptionResult>;
   close(): void;
   get isClosed(): boolean;
-  // Event: 'segments' -> (segments: AlignedSegment[], audio: Float32Array)
+  on<K extends keyof PipelineSessionEvents>(
+    event: K,
+    listener: (...args: PipelineSessionEvents[K]) => void
+  ): this;
+}
+```
+
+```typescript
+interface PipelineSessionEvents {
+  segments: [segments: AlignedSegment[]];
+  audio: [audio: Float32Array];
+  error: [error: Error];
 }
 ```
 
@@ -138,6 +150,12 @@ Pushes an arbitrary number of samples into the streaming pipeline.
 
 Flushes all stages, runs final recluster + alignment, and returns the definitive result.
 
+```typescript
+type TranscriptionResult = {
+  segments: AlignedSegment[];
+};
+```
+
 #### `close(): void`
 
 Releases native session resources. Safe to call multiple times.
@@ -151,9 +169,18 @@ Returns `true` after `close()`.
 Emitted after each Whisper transcription result with the latest cumulative aligned output.
 
 ```typescript
-session.on('segments', (segments: AlignedSegment[], audio: Float32Array) => {
+session.on('segments', (segments: AlignedSegment[]) => {
   // `segments` contains the latest cumulative speaker-labeled transcript
-  // `audio` contains the chunk submitted for this callback cycle
+});
+```
+
+#### Event: `'audio'`
+
+Emitted in real-time with silence-filtered PCM chunks (`Float32Array`) as the pipeline processes audio.
+
+```typescript
+session.on('audio', (chunk: Float32Array) => {
+  // `chunk` is silence-filtered audio emitted for streaming consumers
 });
 ```
 
@@ -329,6 +356,10 @@ async function runStreaming(audio: Float32Array) {
     }
   });
 
+  session.on('audio', (chunk) => {
+    console.log(`silence-filtered audio chunk: ${chunk.length} samples`);
+  });
+
   const chunkSize = 16000;
   for (let i = 0; i < audio.length; i += chunkSize) {
     const chunk = audio.slice(i, Math.min(i + chunkSize, audio.length));
@@ -424,7 +455,7 @@ The integrated pipeline runs in 7 stages:
 4. Transcription (Whisper sentence-level segments)
 5. Alignment (segment-level speaker assignment by overlap)
 6. Finalize (flush + final recluster + final alignment)
-7. Callback/event emission (`segments` updates)
+7. Callback/event emission (`segments` updates + `audio` chunk streaming)
 
 ## Performance
 

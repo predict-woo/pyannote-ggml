@@ -15,14 +15,13 @@ TranscribeWorker::TranscribeWorker(Napi::Env env,
 
 void TranscribeWorker::OnPipelineCallback(
     const std::vector<AlignedSegment>& segments,
-    const std::vector<float>& audio,
     void* user_data) {
     auto* data = static_cast<TranscribeCallbackData*>(user_data);
     data->segments = segments;
 }
 
 void TranscribeWorker::Execute() {
-    PipelineState* state = pipeline_init(config_, OnPipelineCallback, &cb_data_);
+    PipelineState* state = pipeline_init(config_, OnPipelineCallback, nullptr, &cb_data_);
     if (!state) {
         SetError("Failed to initialize pipeline state");
         return;
