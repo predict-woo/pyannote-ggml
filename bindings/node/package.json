@@ -1,6 +1,7 @@
 {
   "name": "pyannote-cpp-node-workspace",
   "private": true,
+  "version": "0.2.2",
   "type": "module",
   "engines": { "node": ">=18" },
   "scripts": {

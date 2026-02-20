@@ -1,6 +1,6 @@
 {
   "name": "pyannote-cpp-node",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,7 @@
     "test": "vitest run"
   },
   "optionalDependencies": {
-    "@pyannote-cpp-node/darwin-arm64": "0.2.1",
+    "@pyannote-cpp-node/darwin-arm64": "0.2.2",
     "@pyannote-cpp-node/darwin-x64": "0.2.1"
   },
   "devDependencies": {
