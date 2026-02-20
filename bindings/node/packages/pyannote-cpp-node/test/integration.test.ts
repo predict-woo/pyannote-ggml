@@ -85,15 +85,14 @@ describe('One-shot transcribe', () => {
     model.close();
   });
 
-  it('produces non-empty segments with words', async () => {
+  it('produces non-empty segments with text', async () => {
     const result = await model.transcribe(audio);
     expect(result.segments).toBeDefined();
     expect(result.segments.length).toBeGreaterThan(0);
 
-    // Check first segment has words
     const firstSeg = result.segments[0];
-    expect(firstSeg.words).toBeDefined();
-    expect(firstSeg.words.length).toBeGreaterThan(0);
+    expect(firstSeg.text).toBeDefined();
+    expect(firstSeg.text.length).toBeGreaterThan(0);
   });
 
   it('segments have correct shape', async () => {
@@ -103,24 +102,10 @@ describe('One-shot transcribe', () => {
       expect(typeof seg.start).toBe('number');
       expect(typeof seg.duration).toBe('number');
       expect(typeof seg.text).toBe('string');
-      expect(Array.isArray(seg.words)).toBe(true);
       expect(seg.start).toBeGreaterThanOrEqual(0);
       expect(seg.duration).toBeGreaterThan(0);
       expect(seg.speaker).toMatch(/^SPEAKER_\d+$/);
       expect(seg.text.length).toBeGreaterThan(0);
-    }
-  });
-
-  it('words have correct shape', async () => {
-    const result = await model.transcribe(audio);
-    for (const seg of result.segments) {
-      for (const word of seg.words) {
-        expect(typeof word.text).toBe('string');
-        expect(typeof word.start).toBe('number');
-        expect(typeof word.end).toBe('number');
-        expect(word.text.length).toBeGreaterThan(0);
-        expect(word.end).toBeGreaterThanOrEqual(word.start);
-      }
     }
   });
 
@@ -215,7 +200,6 @@ describe('Streaming session', () => {
       expect(typeof seg.start).toBe('number');
       expect(typeof seg.duration).toBe('number');
       expect(typeof seg.text).toBe('string');
-      expect(Array.isArray(seg.words)).toBe(true);
     }
 
     session.close();

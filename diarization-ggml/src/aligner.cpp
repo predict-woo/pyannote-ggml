@@ -81,26 +81,12 @@ std::vector<AlignedSegment> align_segments(
     for (const auto& seg : segments) {
         std::string speaker = assign_speaker_for_segment(seg.start, seg.end, sorted_diar);
 
-        std::vector<AlignedWord> aligned_words;
-        aligned_words.reserve(seg.words.size());
-        for (const auto& w : seg.words) {
-            aligned_words.push_back({w.text, w.start, w.end, speaker});
-        }
-
-        if (!result.empty() && result.back().speaker == speaker) {
-            AlignedSegment& prev = result.back();
-            prev.words.insert(prev.words.end(),
-                              std::make_move_iterator(aligned_words.begin()),
-                              std::make_move_iterator(aligned_words.end()));
-            prev.duration = prev.words.back().end - prev.start;
-        } else {
-            AlignedSegment aligned_seg;
-            aligned_seg.speaker = speaker;
-            aligned_seg.start = seg.start;
-            aligned_seg.duration = seg.end - seg.start;
-            aligned_seg.words = std::move(aligned_words);
-            result.push_back(std::move(aligned_seg));
-        }
+        AlignedSegment aligned_seg;
+        aligned_seg.speaker = speaker;
+        aligned_seg.start = seg.start;
+        aligned_seg.duration = seg.end - seg.start;
+        aligned_seg.text = seg.text;
+        result.push_back(std::move(aligned_seg));
     }
 
     return result;

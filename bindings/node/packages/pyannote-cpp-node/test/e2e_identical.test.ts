@@ -89,32 +89,14 @@ function trimAsciiWhitespace(s: string): string {
   return s.slice(start, end);
 }
 
-function segmentText(seg: AlignedSegment): string {
-  let raw = '';
-  for (const word of seg.words) {
-    raw += word.text;
-  }
-  return trimAsciiWhitespace(raw);
-}
-
 function writeSegmentsJson(segments: AlignedSegment[]): string {
   let out = '{\n  "segments": [\n';
 
   for (let s = 0; s < segments.length; s++) {
     const seg = segments[s];
-    const combinedText = segmentText(seg);
+    const text = trimAsciiWhitespace(seg.text);
 
-    out += `    {"speaker": "${jsonEscape(seg.speaker)}", "start": ${seg.start.toFixed(6)}, "duration": ${seg.duration.toFixed(6)}, "text": "${jsonEscape(combinedText)}", "words": [`;
-
-    for (let w = 0; w < seg.words.length; w++) {
-      const word = seg.words[w];
-      if (w > 0) {
-        out += ', ';
-      }
-      out += `{"text": "${jsonEscape(word.text)}", "start": ${word.start.toFixed(6)}, "end": ${word.end.toFixed(6)}}`;
-    }
-
-    out += ']}';
+    out += `    {"speaker": "${jsonEscape(seg.speaker)}", "start": ${seg.start.toFixed(6)}, "duration": ${seg.duration.toFixed(6)}, "text": "${jsonEscape(text)}"}`;
     if (s + 1 < segments.length) {
       out += ',';
     }

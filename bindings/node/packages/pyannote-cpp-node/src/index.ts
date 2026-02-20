@@ -2,7 +2,6 @@ export { Pipeline } from './Pipeline.js';
 export { PipelineSession } from './PipelineSession.js';
 export type {
   AlignedSegment,
-  AlignedWord,
   ModelConfig,
   TranscriptionResult,
 } from './types.js';

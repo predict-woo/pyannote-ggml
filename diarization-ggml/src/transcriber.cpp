@@ -72,7 +72,7 @@ static void worker_loop(Transcriber* t) {
         params.print_progress   = false;
         params.print_realtime   = false;
         params.print_timestamps = false;
-        params.token_timestamps = true;   // required for word-level alignment
+        params.token_timestamps = false;
 
         // User-configurable params
         params.language         = t->config.language;
@@ -118,38 +118,14 @@ static void worker_loop(Transcriber* t) {
         for (int seg = 0; seg < n_segments; seg++) {
             int64_t seg_t0 = whisper_full_get_segment_t0(t->ctx, seg);
             int64_t seg_t1 = whisper_full_get_segment_t1(t->ctx, seg);
+            const char* text = whisper_full_get_segment_text(t->ctx, seg);
+            if (!text || text[0] == '\0') continue;
 
             TranscribeSegment ts;
             ts.start = seg_t0 * 0.01 + start_time;
             ts.end   = seg_t1 * 0.01 + start_time;
-
-            std::string seg_text;
-            int n_tokens = whisper_full_n_tokens(t->ctx, seg);
-            for (int tok = 0; tok < n_tokens; tok++) {
-                const char* text = whisper_full_get_token_text(t->ctx, seg, tok);
-                if (!text || text[0] == '\0' || text[0] == '[') continue;
-
-                bool all_ws = true;
-                for (const char* p = text; *p; p++) {
-                    if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
-                        all_ws = false;
-                        break;
-                    }
-                }
-                if (all_ws) continue;
-
-                auto tdata = whisper_full_get_token_data(t->ctx, seg, tok);
-                double t0 = tdata.t0 * 0.01 + start_time;
-                double t1 = tdata.t1 * 0.01 + start_time;
-
-                ts.words.push_back({text, t0, t1});
-                seg_text += text;
-            }
-
-            if (!ts.words.empty()) {
-                ts.text = seg_text;
-                res.segments.push_back(std::move(ts));
-            }
+            ts.text  = text;
+            res.segments.push_back(std::move(ts));
         }
 
         res.valid = true;

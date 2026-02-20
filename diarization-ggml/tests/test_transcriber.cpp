@@ -108,35 +108,24 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    size_t total_words = 0;
-    for (const auto& seg : result.segments) {
-        total_words += seg.words.size();
-    }
-    printf("Got %zu segments (%zu total words)\n", result.segments.size(), total_words);
+    printf("Got %zu segments\n", result.segments.size());
 
     int failures = 0;
 
-    if (total_words < 10) {
-        printf("FAIL: expected >=10 words, got %zu\n", total_words);
+    if (result.segments.size() < 1) {
+        printf("FAIL: expected >=1 segments\n");
         failures++;
     }
 
     for (size_t s = 0; s < result.segments.size(); s++) {
         const auto& seg = result.segments[s];
-        if (seg.words.empty()) {
-            printf("FAIL: segment %zu has no words\n", s);
+        if (seg.text.empty()) {
+            printf("FAIL: segment %zu has empty text\n", s);
             failures++;
         }
-        for (size_t w = 0; w < seg.words.size(); w++) {
-            const auto& word = seg.words[w];
-            if (word.text.empty()) {
-                printf("FAIL: segment %zu word %zu has empty text\n", s, w);
-                failures++;
-            }
-            if (word.start > word.end) {
-                printf("FAIL: segment %zu word %zu has start (%.3f) > end (%.3f)\n", s, w, word.start, word.end);
-                failures++;
-            }
+        if (seg.start > seg.end) {
+            printf("FAIL: segment %zu has start (%.3f) > end (%.3f)\n", s, seg.start, seg.end);
+            failures++;
         }
     }
 
@@ -144,9 +133,6 @@ int main(int argc, char* argv[]) {
     for (size_t s = 0; s < std::min(result.segments.size(), (size_t)3); s++) {
         const auto& seg = result.segments[s];
         printf("  Segment %zu [%.3f - %.3f]: '%s'\n", s, seg.start, seg.end, seg.text.c_str());
-        for (size_t w = 0; w < std::min(seg.words.size(), (size_t)5); w++) {
-            printf("    [%.3f - %.3f] '%s'\n", seg.words[w].start, seg.words[w].end, seg.words[w].text.c_str());
-        }
     }
 
     transcriber_free(t);

@@ -25,7 +25,6 @@ TranscribeSegment make_segment(const std::string& text, double start, double end
     seg.start = start;
     seg.end = end;
     seg.text = text;
-    seg.words.push_back({text, start, end});
     return seg;
 }
 
@@ -45,15 +44,15 @@ int main() {
         };
 
         auto aligned = align_segments(segments, diarization);
-        if (require(aligned.size() == 2, "Test 1 expected 2 aligned segments")) return 1;
-        if (require(aligned[0].speaker == "SPEAKER_00", "Test 1 first segment speaker")) return 1;
-        if (require(aligned[1].speaker == "SPEAKER_01", "Test 1 second segment speaker")) return 1;
-        if (require(aligned[0].words.size() == 2, "Test 1 first segment word count")) return 1;
-        if (require(aligned[1].words.size() == 2, "Test 1 second segment word count")) return 1;
-        if (require(aligned[0].words[0].speaker == "SPEAKER_00", "Test 1 hello speaker")) return 1;
-        if (require(aligned[0].words[1].speaker == "SPEAKER_00", "Test 1 world speaker")) return 1;
-        if (require(aligned[1].words[0].speaker == "SPEAKER_01", "Test 1 foo speaker")) return 1;
-        if (require(aligned[1].words[1].speaker == "SPEAKER_01", "Test 1 bar speaker")) return 1;
+        if (require(aligned.size() == 4, "Test 1 expected 4 aligned segments (no merging)")) return 1;
+        if (require(aligned[0].speaker == "SPEAKER_00", "Test 1 seg 0 speaker")) return 1;
+        if (require(aligned[1].speaker == "SPEAKER_00", "Test 1 seg 1 speaker")) return 1;
+        if (require(aligned[2].speaker == "SPEAKER_01", "Test 1 seg 2 speaker")) return 1;
+        if (require(aligned[3].speaker == "SPEAKER_01", "Test 1 seg 3 speaker")) return 1;
+        if (require(aligned[0].text == "hello", "Test 1 seg 0 text")) return 1;
+        if (require(aligned[1].text == "world", "Test 1 seg 1 text")) return 1;
+        if (require(aligned[2].text == "foo", "Test 1 seg 2 text")) return 1;
+        if (require(aligned[3].text == "bar", "Test 1 seg 3 text")) return 1;
     }
 
     {
@@ -69,11 +68,11 @@ int main() {
         auto aligned = align_segments(segments, diarization);
         if (require(aligned.size() >= 1, "Test 2 expected at least one aligned segment")) return 1;
 
-        const std::string overlap_speaker = aligned[0].words[0].speaker;
+        const std::string overlap_speaker = aligned[0].speaker;
         const bool overlap_ok = overlap_speaker == "SPEAKER_00" || overlap_speaker == "SPEAKER_01";
         if (require(overlap_ok, "Test 2 overlap speaker must be 00 or 01")) return 1;
 
-        const std::string mostly01_speaker = (aligned.size() == 1) ? aligned[0].words[1].speaker : aligned[1].words[0].speaker;
+        const std::string mostly01_speaker = (aligned.size() == 1) ? aligned[0].speaker : aligned.back().speaker;
         if (require(mostly01_speaker == "SPEAKER_01", "Test 2 mostly01 should be SPEAKER_01")) return 1;
     }
 
@@ -88,8 +87,8 @@ int main() {
 
         auto aligned = align_segments(segments, diarization);
         if (require(aligned.size() == 1, "Test 3 expected one aligned segment")) return 1;
-        if (require(aligned[0].words.size() == 1, "Test 3 expected one word")) return 1;
-        if (require(aligned[0].words[0].speaker == "SPEAKER_00", "Test 3 gap word nearest speaker")) return 1;
+        if (require(aligned[0].speaker == "SPEAKER_00", "Test 3 gap nearest speaker")) return 1;
+        if (require(aligned[0].text == "gap", "Test 3 gap text")) return 1;
     }
 
     {
@@ -116,10 +115,10 @@ int main() {
 
         auto aligned = align_segments(segments, diarization);
         if (require(aligned.size() == 2, "Test 5 expected two aligned segments")) return 1;
-        const std::string first_speaker = aligned[0].words[0].speaker;
+        const std::string first_speaker = aligned[0].speaker;
         const bool first_ok = first_speaker == "SPEAKER_00" || first_speaker == "SPEAKER_01";
-        if (require(first_ok, "Test 5 overlap token speaker must be 00 or 01")) return 1;
-        if (require(aligned[1].words[0].speaker == "SPEAKER_00", "Test 5 more_00 should be SPEAKER_00")) return 1;
+        if (require(first_ok, "Test 5 overlap segment speaker must be 00 or 01")) return 1;
+        if (require(aligned[1].speaker == "SPEAKER_00", "Test 5 more_00 should be SPEAKER_00")) return 1;
     }
 
     std::fprintf(stderr, "PASS: test_aligner\n");

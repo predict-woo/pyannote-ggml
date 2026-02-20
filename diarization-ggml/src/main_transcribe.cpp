@@ -249,35 +249,17 @@ static std::string trim_ascii_whitespace(const std::string& s) {
     return s.substr(start, end - start);
 }
 
-static std::string segment_text(const AlignedSegment& seg) {
-    std::string raw;
-    for (const AlignedWord& word : seg.words) {
-        raw += word.text;
-    }
-    return trim_ascii_whitespace(raw);
-}
-
 static void write_segments_json(FILE* out, const std::vector<AlignedSegment>& segments) {
     std::fprintf(out, "{\n  \"segments\": [\n");
     for (size_t s = 0; s < segments.size(); ++s) {
         const AlignedSegment& seg = segments[s];
-        const std::string combined_text = segment_text(seg);
-        std::fprintf(out, "    {\"speaker\": \"%s\", \"start\": %.6f, \"duration\": %.6f, \"text\": \"%s\", \"words\": [",
+        const std::string text = trim_ascii_whitespace(seg.text);
+        std::fprintf(out, "    {\"speaker\": \"%s\", \"start\": %.6f, \"duration\": %.6f, \"text\": \"%s\"}%s\n",
                      json_escape(seg.speaker).c_str(),
                      seg.start,
                      seg.duration,
-                     json_escape(combined_text).c_str());
-
-        for (size_t w = 0; w < seg.words.size(); ++w) {
-            const AlignedWord& word = seg.words[w];
-            std::fprintf(out, "%s{\"text\": \"%s\", \"start\": %.6f, \"end\": %.6f}",
-                         (w == 0 ? "" : ", "),
-                         json_escape(word.text).c_str(),
-                         word.start,
-                         word.end);
-        }
-
-        std::fprintf(out, "]}%s\n", (s + 1 == segments.size() ? "" : ","));
+                     json_escape(text).c_str(),
+                     (s + 1 == segments.size() ? "" : ","));
     }
     std::fprintf(out, "  ]\n}\n");
 }

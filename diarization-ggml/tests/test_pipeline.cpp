@@ -198,39 +198,26 @@ int main(int argc, char* argv[]) {
     }
 
     std::set<std::string> speakers;
-    int total_words = 0;
-    bool timestamps_valid = true;
+    bool has_text = false;
 
     for (const auto& seg : cb_ctx.results) {
         speakers.insert(seg.speaker);
-        for (const auto& word : seg.words) {
-            total_words++;
-            if (word.text.empty()) {
-                fprintf(stderr, "FAIL: empty word text found\n");
-                ok = false;
-            }
-            if (word.start > word.end) {
-                fprintf(stderr, "FAIL: invalid timestamps: start=%.3f end=%.3f text='%s'\n",
-                        word.start, word.end, word.text.c_str());
-                timestamps_valid = false;
-            }
+        if (!seg.text.empty()) {
+            has_text = true;
         }
     }
-
-    if (!timestamps_valid) ok = false;
 
     fprintf(stderr, "Speakers found: %zu (", speakers.size());
     for (const auto& s : speakers) fprintf(stderr, " %s", s.c_str());
     fprintf(stderr, " )\n");
-    fprintf(stderr, "Total words: %d\n", total_words);
 
     if (speakers.size() < 2) {
         fprintf(stderr, "FAIL: expected >=2 speakers, got %zu\n", speakers.size());
         ok = false;
     }
 
-    if (total_words < 1) {
-        fprintf(stderr, "FAIL: no words produced\n");
+    if (!has_text) {
+        fprintf(stderr, "FAIL: no text produced\n");
         ok = false;
     }
 
@@ -258,11 +245,9 @@ int main(int argc, char* argv[]) {
     }
 
     for (const auto& seg : cb_ctx.results) {
-        fprintf(stderr, "  [%.2f - %.2f] %s:", seg.start, seg.start + seg.duration, seg.speaker.c_str());
-        for (const auto& w : seg.words) {
-            fprintf(stderr, " %s", w.text.c_str());
-        }
-        fprintf(stderr, "\n");
+        fprintf(stderr, "  [%.2f - %.2f] %s: %s\n",
+                seg.start, seg.start + seg.duration,
+                seg.speaker.c_str(), seg.text.c_str());
     }
 
     pipeline_free(state);

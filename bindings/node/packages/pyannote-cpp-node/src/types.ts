@@ -74,18 +74,11 @@ export interface ModelConfig {
   suppressNst?: boolean;
 }
 
-export interface AlignedWord {
-  text: string;
-  start: number;  // seconds
-  end: number;    // seconds
-}
-
 export interface AlignedSegment {
   speaker: string;
   start: number;
   duration: number;
   text: string;
-  words: AlignedWord[];
 }
 
 export interface TranscriptionResult {

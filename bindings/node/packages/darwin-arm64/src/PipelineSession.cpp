@@ -16,25 +16,7 @@ static Napi::Object MarshalSegment(Napi::Env env, const AlignedSegment& seg) {
     obj.Set("speaker", Napi::String::New(env, seg.speaker));
     obj.Set("start", Napi::Number::New(env, seg.start));
     obj.Set("duration", Napi::Number::New(env, seg.duration));
-
-    std::string text;
-    for (const auto& w : seg.words) {
-        if (!text.empty()) text += " ";
-        text += w.text;
-    }
-    obj.Set("text", Napi::String::New(env, text));
-
-    Napi::Array wordsArr = Napi::Array::New(env, seg.words.size());
-    for (size_t j = 0; j < seg.words.size(); j++) {
-        const auto& w = seg.words[j];
-        Napi::Object wobj = Napi::Object::New(env);
-        wobj.Set("text", Napi::String::New(env, w.text));
-        wobj.Set("start", Napi::Number::New(env, w.start));
-        wobj.Set("end", Napi::Number::New(env, w.end));
-        wordsArr.Set(static_cast<uint32_t>(j), wobj);
-    }
-    obj.Set("words", wordsArr);
-
+    obj.Set("text", Napi::String::New(env, seg.text));
     return obj;
 }
 

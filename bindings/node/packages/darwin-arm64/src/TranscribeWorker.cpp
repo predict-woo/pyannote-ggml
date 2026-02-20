@@ -52,24 +52,7 @@ void TranscribeWorker::OnOK() {
         obj.Set("speaker", Napi::String::New(env, seg.speaker));
         obj.Set("start", Napi::Number::New(env, seg.start));
         obj.Set("duration", Napi::Number::New(env, seg.duration));
-
-        std::string text;
-        for (size_t w = 0; w < seg.words.size(); w++) {
-            if (w > 0) text += " ";
-            text += seg.words[w].text;
-        }
-        obj.Set("text", Napi::String::New(env, text));
-
-        Napi::Array jsWords = Napi::Array::New(env, seg.words.size());
-        for (size_t w = 0; w < seg.words.size(); w++) {
-            const auto& word = seg.words[w];
-            Napi::Object wordObj = Napi::Object::New(env);
-            wordObj.Set("text", Napi::String::New(env, word.text));
-            wordObj.Set("start", Napi::Number::New(env, word.start));
-            wordObj.Set("end", Napi::Number::New(env, word.end));
-            jsWords.Set(static_cast<uint32_t>(w), wordObj);
-        }
-        obj.Set("words", jsWords);
+        obj.Set("text", Napi::String::New(env, seg.text));
 
         jsSegments.Set(static_cast<uint32_t>(i), obj);
     }
