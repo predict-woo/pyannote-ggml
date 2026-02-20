@@ -1,6 +1,6 @@
 {
   "name": "@pyannote-cpp-node/darwin-arm64",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "os": ["darwin"],
   "cpu": ["arm64"],
   "main": "./index.js",
