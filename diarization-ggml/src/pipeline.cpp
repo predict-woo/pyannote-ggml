@@ -14,7 +14,6 @@
 
 static constexpr int SAMPLE_RATE = 16000;
 static constexpr double MIN_SEGMENT_DURATION = 20.0;
-static constexpr int MAX_WHISPER_SAMPLES = 30 * SAMPLE_RATE;
 
 struct PendingSubmission {
     std::vector<float> audio;
@@ -38,6 +37,7 @@ struct PipelineState {
     std::vector<TranscribeSegment> all_transcribe_segments;
     std::deque<PendingSubmission> submission_queue;
     std::vector<float> last_submitted_audio;
+    std::vector<float> all_audio;  // accumulated audio from all submissions
 
     whisper_vad_context* vad_ctx;
 };
@@ -63,10 +63,6 @@ static void enqueue_audio_chunk(PipelineState* state, int64_t abs_start, int64_t
 
     if (audio.empty()) return;
 
-    if ((int)audio.size() > MAX_WHISPER_SAMPLES) {
-        audio.resize(MAX_WHISPER_SAMPLES);
-    }
-
     double start_time = state->buffer_start_time;
 
     state->audio_buffer.dequeue_up_to(abs_end);
@@ -76,6 +72,8 @@ static void enqueue_audio_chunk(PipelineState* state, int64_t abs_start, int64_t
             static_cast<double>(audio.size()) / SAMPLE_RATE,
             start_time,
             state->submission_queue.size() + 1);
+
+    state->all_audio.insert(state->all_audio.end(), audio.begin(), audio.end());
 
     state->submission_queue.push_back({std::move(audio), start_time});
     try_submit_next(state);
@@ -251,7 +249,7 @@ void pipeline_finalize(PipelineState* state) {
         fprintf(stderr, "[pipeline] finalize: final re-alignment produced %zu segments from %zu transcribe segments\n",
                 state->all_segments.size(), state->all_transcribe_segments.size());
         if (state->callback) {
-            state->callback(state->all_segments, {}, state->user_data);
+            state->callback(state->all_segments, state->all_audio, state->user_data);
         }
     }
 

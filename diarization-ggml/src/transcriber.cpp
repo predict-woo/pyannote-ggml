@@ -10,7 +10,6 @@
 #include <vector>
 
 static constexpr int SAMPLE_RATE = 16000;
-static constexpr int MAX_SAMPLES = 30 * SAMPLE_RATE;  // 30s hard cap
 static constexpr int MIN_SAMPLES = SAMPLE_RATE;        // 1s minimum
 
 struct Transcriber {
@@ -56,12 +55,6 @@ static void worker_loop(Transcriber* t) {
             t->has_result = true;
             t->cv_result.notify_one();
             continue;
-        }
-
-        if ((int)audio.size() > MAX_SAMPLES) {
-            fprintf(stderr, "WARNING: transcriber audio truncated from %d to %d samples (30s cap)\n",
-                    (int)audio.size(), MAX_SAMPLES);
-            audio.resize(MAX_SAMPLES);
         }
 
         // Choose strategy based on beam_size
