@@ -29,6 +29,7 @@ struct PipelineState {
 
     double buffer_start_time;
     bool whisper_in_flight;
+    bool buffer_has_speech;
 
     pipeline_callback callback;
     pipeline_audio_callback audio_callback;
@@ -64,12 +65,17 @@ static void enqueue_audio_chunk(PipelineState* state, int64_t abs_start, int64_t
     double start_time = state->buffer_start_time;
 
     state->audio_buffer.dequeue_up_to(abs_end);
+    state->buffer_has_speech = false;
     state->buffer_start_time = static_cast<double>(state->audio_buffer.dequeued_frames()) / SAMPLE_RATE;
 
     fprintf(stderr, "[pipeline] enqueue_audio_chunk: queued %.3fs (start=%.3fs, queue: %zu)\n",
             static_cast<double>(audio.size()) / SAMPLE_RATE,
             start_time,
             state->submission_queue.size() + 1);
+
+    if (state->audio_callback) {
+        state->audio_callback(audio.data(), (int)audio.size(), state->user_data);
+    }
 
     state->submission_queue.push_back({std::move(audio), start_time});
     try_submit_next(state);
@@ -101,6 +107,7 @@ PipelineState* pipeline_init(const PipelineConfig& config, pipeline_callback cb,
     state->user_data = user_data;
     state->buffer_start_time = 0.0;
     state->whisper_in_flight = false;
+    state->buffer_has_speech = false;
     state->vad_ctx = nullptr;
 
     if (config.vad_model_path) {
@@ -156,14 +163,14 @@ std::vector<bool> pipeline_push(PipelineState* state, const float* samples, int 
 
     SilenceFilterResult sf_result = silence_filter_push(state->silence_filter, samples, n_samples);
 
-    // Fire audio callback with silence-filtered audio
-    if (state->audio_callback && !sf_result.audio.empty()) {
-        state->audio_callback(sf_result.audio.data(), (int)sf_result.audio.size(), state->user_data);
-    }
 
     bool need_flush = sf_result.flush_signal;
 
     if (!sf_result.audio.empty()) {
+        for (bool pred : sf_result.vad_predictions) {
+            if (pred) { state->buffer_has_speech = true; break; }
+        }
+
         state->audio_buffer.enqueue(sf_result.audio.data(), (int)sf_result.audio.size());
 
         std::vector<VADChunk> vad_chunks = streaming_push(
@@ -187,7 +194,7 @@ std::vector<bool> pipeline_push(PipelineState* state, const float* samples, int 
         }
     }
 
-    if (need_flush && state->audio_buffer.size() > 0) {
+    if (need_flush && state->audio_buffer.size() > 0 && state->buffer_has_speech) {
         int64_t abs_start = state->audio_buffer.dequeued_frames();
         int64_t abs_end = state->audio_buffer.total_frames();
         enqueue_audio_chunk(state, abs_start, abs_end);
@@ -212,9 +219,6 @@ void pipeline_finalize(PipelineState* state) {
     SilenceFilterResult sf_flush = silence_filter_flush(state->silence_filter);
     fprintf(stderr, "[pipeline] finalize: silence_filter_flush emitted %zu samples\n", sf_flush.audio.size());
 
-    if (state->audio_callback && !sf_flush.audio.empty()) {
-        state->audio_callback(sf_flush.audio.data(), (int)sf_flush.audio.size(), state->user_data);
-    }
 
     if (!sf_flush.audio.empty()) {
         state->audio_buffer.enqueue(sf_flush.audio.data(), (int)sf_flush.audio.size());
@@ -224,7 +228,7 @@ void pipeline_finalize(PipelineState* state) {
     }
 
     // Enqueue any remaining audio in the buffer
-    if (state->audio_buffer.size() > 0) {
+    if (state->audio_buffer.size() > 0 && state->buffer_has_speech) {
         int64_t abs_start = state->audio_buffer.dequeued_frames();
         int64_t abs_end = state->audio_buffer.total_frames();
         enqueue_audio_chunk(state, abs_start, abs_end);
