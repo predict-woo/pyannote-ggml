@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -50,6 +50,39 @@ function loadWav(filePath: string): Float32Array {
 
   throw new Error('No data chunk found in WAV file');
 }
+function writeWav(filePath: string, samples: Float32Array, sampleRate = 16000): void {
+  const numSamples = samples.length;
+  const dataBytes = numSamples * 2; // 16-bit PCM
+  const headerSize = 44;
+  const buffer = Buffer.alloc(headerSize + dataBytes);
+
+  // RIFF header
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(headerSize + dataBytes - 8, 4);
+  buffer.write('WAVE', 8);
+
+  // fmt chunk
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);        // chunk size
+  buffer.writeUInt16LE(1, 20);          // PCM format
+  buffer.writeUInt16LE(1, 22);          // mono
+  buffer.writeUInt32LE(sampleRate, 24); // sample rate
+  buffer.writeUInt32LE(sampleRate * 2, 28); // byte rate
+  buffer.writeUInt16LE(2, 32);          // block align
+  buffer.writeUInt16LE(16, 34);         // bits per sample
+
+  // data chunk
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataBytes, 40);
+
+  for (let i = 0; i < numSamples; i++) {
+    const clamped = Math.max(-1, Math.min(1, samples[i]));
+    buffer.writeInt16LE(Math.round(clamped * 32767), headerSize + i * 2);
+  }
+
+  writeFileSync(filePath, buffer);
+}
+
 
 describe('Audio passthrough without VAD', () => {
   let pipeline: Pipeline;
@@ -112,6 +145,13 @@ describe('Audio passthrough without VAD', () => {
     }
 
     expect(bytesEqual).toBe(true);
+
+    // Write collected audio to WAV for manual listening
+    const outPath = resolve(PROJECT_ROOT, 'samples/audio_passthrough_output.wav');
+    writeWav(outPath, collected);
+    console.log(`\nWrote passthrough audio to: ${outPath}`);
+    console.log(`  Samples: ${collected.length} (${(collected.length / 16000).toFixed(2)}s at 16kHz)`);
+
     session.close();
   }, 120000);
 });
