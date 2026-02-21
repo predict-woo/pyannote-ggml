@@ -155,3 +155,54 @@ describe('Audio passthrough without VAD', () => {
     session.close();
   }, 120000);
 });
+
+describe('Audio passthrough with VAD', () => {
+  let pipeline: Pipeline;
+  const input = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
+
+  beforeAll(async () => {
+    pipeline = await Pipeline.load({
+      ...config,
+      vadModelPath: resolve(PROJECT_ROOT, 'whisper.cpp/models/ggml-silero-v6.2.0.bin'),
+    });
+  });
+
+  afterAll(() => {
+    pipeline.close();
+  });
+
+  it('saves VAD-filtered audio to WAV for manual listening', async () => {
+    const session = pipeline.createSession();
+    const audioChunks: Float32Array[] = [];
+
+    session.on('audio', (chunk: Float32Array) => {
+      audioChunks.push(new Float32Array(chunk));
+    });
+
+    const CHUNK_SIZE = 16000;
+    for (let offset = 0; offset < input.length; offset += CHUNK_SIZE) {
+      const end = Math.min(offset + CHUNK_SIZE, input.length);
+      await session.push(input.slice(offset, end));
+    }
+
+    await session.finalize();
+
+    const totalLength = audioChunks.reduce((sum, c) => sum + c.length, 0);
+    const collected = new Float32Array(totalLength);
+    let offset = 0;
+    for (const chunk of audioChunks) {
+      collected.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    expect(collected.length).toBeGreaterThan(0);
+
+    const outPath = resolve(PROJECT_ROOT, 'samples/audio_vad_output.wav');
+    writeWav(outPath, collected);
+    console.log(`\nWrote VAD-filtered audio to: ${outPath}`);
+    console.log(`  Samples: ${collected.length} (${(collected.length / 16000).toFixed(2)}s at 16kHz)`);
+    console.log(`  Compression: ${((1 - collected.length / input.length) * 100).toFixed(1)}% removed by VAD`);
+
+    session.close();
+  }, 120000);
+});
