@@ -1,6 +1,9 @@
 {
   "active_plan": "/Users/andyye/dev/whisper-diarization.cpp/pyannote.cpp/.sisyphus/plans/node-bindings-pipeline.md",
   "started_at": "2026-02-19T08:16:57.421Z",
-  "session_ids": ["ses_38b1de4c4ffen3wJF91Xq6r2bt"],
+  "session_ids": [
+    "ses_38b1de4c4ffen3wJF91Xq6r2bt",
+    "ses_37e5bdab9ffeU84hth3UBrNgTc"
+  ],
   "plan_name": "node-bindings-pipeline"
 }
