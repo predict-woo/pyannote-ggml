@@ -88,6 +88,8 @@ pipeline.close();
 class Pipeline {
   static async load(config: ModelConfig): Promise<Pipeline>;
   async transcribe(audio: Float32Array): Promise<TranscriptionResult>;
+  setLanguage(language: string): void;
+  setDecodeOptions(options: DecodeOptions): void;
   createSession(): PipelineSession;
   close(): void;
   get isClosed(): boolean;
@@ -101,6 +103,14 @@ Validates model paths and initializes native pipeline resources.
 #### `async transcribe(audio: Float32Array): Promise<TranscriptionResult>`
 
 Runs one-shot transcription + diarization on the full audio buffer.
+
+#### `setLanguage(language: string): void`
+
+Updates the Whisper decode language for subsequent `transcribe()` calls. This is a convenience shorthand for `setDecodeOptions({ language })`.
+
+#### `setDecodeOptions(options: DecodeOptions): void`
+
+Updates one or more Whisper decode options for subsequent `transcribe()` calls. Only the fields you pass are changed; others retain their current values. See `DecodeOptions` for available fields.
 
 #### `createSession(): PipelineSession`
 
@@ -120,6 +130,8 @@ Returns `true` after `close()`.
 ```typescript
 class PipelineSession extends EventEmitter {
   async push(audio: Float32Array): Promise<boolean[]>;
+  setLanguage(language: string): void;
+  setDecodeOptions(options: DecodeOptions): void;
   async finalize(): Promise<TranscriptionResult>;
   close(): void;
   get isClosed(): boolean;
@@ -145,6 +157,14 @@ Pushes an arbitrary number of samples into the streaming pipeline.
 - Return value is per-frame VAD booleans (`true` = speech, `false` = silence)
 - First 10 seconds return an empty array because the pipeline needs a full 10-second window
 - Chunk size is flexible; not restricted to 16,000-sample pushes
+
+#### `setLanguage(language: string): void`
+
+Updates the Whisper decode language on the live streaming session. Takes effect on the next Whisper decode run. Thread-safe — the change is pushed to the C++ pipeline immediately.
+
+#### `setDecodeOptions(options: DecodeOptions): void`
+
+Updates one or more Whisper decode options on the live streaming session. Takes effect on the next Whisper decode run. Thread-safe — changes are pushed to the C++ pipeline immediately. Only the fields you pass are changed; others retain their current values.
 
 #### `async finalize(): Promise<TranscriptionResult>`
 
@@ -284,6 +304,41 @@ export interface ModelConfig {
   suppressNst?: boolean;
 }
 
+export interface DecodeOptions {
+  /** Language code (e.g., 'en', 'zh'). Omit for auto-detect. */
+  language?: string;
+  /** Translate non-English speech to English */
+  translate?: boolean;
+  /** Auto-detect spoken language. Overrides 'language' when true. */
+  detectLanguage?: boolean;
+  /** Number of threads for Whisper inference */
+  nThreads?: number;
+  /** Sampling temperature. 0.0 = greedy deterministic. */
+  temperature?: number;
+  /** Temperature increment for fallback retries */
+  temperatureInc?: number;
+  /** Disable temperature fallback. If true, temperatureInc is ignored. */
+  noFallback?: boolean;
+  /** Beam search size. -1 uses greedy decoding. >1 enables beam search. */
+  beamSize?: number;
+  /** Best-of-N sampling candidates for greedy decoding */
+  bestOf?: number;
+  /** Entropy threshold for decoder fallback */
+  entropyThold?: number;
+  /** Log probability threshold for decoder fallback */
+  logprobThold?: number;
+  /** No-speech probability threshold */
+  noSpeechThold?: number;
+  /** Initial prompt text to condition the decoder */
+  prompt?: string;
+  /** Don't use previous segment as context for next segment */
+  noContext?: boolean;
+  /** Suppress blank outputs at the beginning of segments */
+  suppressBlank?: boolean;
+  /** Suppress non-speech tokens */
+  suppressNst?: boolean;
+}
+
 export interface AlignedSegment {
   /** Global speaker label (e.g., SPEAKER_00). */
   speaker: string;
@@ -417,6 +472,60 @@ const pipeline = await Pipeline.load({
   suppressBlank: true,
   suppressNst: false,
 });
+```
+
+### Changing language at runtime
+
+```typescript
+import { Pipeline } from 'pyannote-cpp-node';
+
+const pipeline = await Pipeline.load({
+  segModelPath: './models/segmentation.gguf',
+  embModelPath: './models/embedding.gguf',
+  pldaPath: './models/plda.gguf',
+  coremlPath: './models/embedding.mlpackage',
+  segCoremlPath: './models/segmentation.mlpackage',
+  whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
+  language: 'en',
+});
+
+// First transcription in English
+const result1 = await pipeline.transcribe(englishAudio);
+
+// Switch to Korean for the next transcription
+pipeline.setLanguage('ko');
+const result2 = await pipeline.transcribe(koreanAudio);
+
+// Or update multiple decode options at once
+pipeline.setDecodeOptions({
+  language: 'zh',
+  temperature: 0.2,
+  beamSize: 5,
+});
+const result3 = await pipeline.transcribe(chineseAudio);
+
+pipeline.close();
+```
+
+Streaming sessions also support runtime changes:
+
+```typescript
+const session = pipeline.createSession();
+
+session.on('segments', (segments) => {
+  console.log(segments);
+});
+
+// Push English audio
+await session.push(englishChunk);
+
+// Switch language mid-stream — takes effect on the next Whisper decode
+session.setLanguage('ko');
+await session.push(koreanChunk);
+
+const result = await session.finalize();
+
+session.close();
 ```
 
 ## JSON Output Format
