@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 
 import type { NativePipelineSession } from './binding.js';
-import type { AlignedSegment, TranscriptionResult } from './types.js';
+import type { AlignedSegment, TranscriptionResult, DecodeOptions } from './types.js';
 
 export interface PipelineSessionEvents {
   segments: [segments: AlignedSegment[]];
@@ -37,6 +37,20 @@ export class PipelineSession extends EventEmitter {
     }
 
     return this.native.push(audio);
+  }
+
+  setLanguage(language: string): void {
+    if (!this.native || this.native.isClosed) {
+      throw new Error('Session is closed');
+    }
+    this.native.setLanguage(language);
+  }
+
+  setDecodeOptions(options: DecodeOptions): void {
+    if (!this.native || this.native.isClosed) {
+      throw new Error('Session is closed');
+    }
+    this.native.setDecodeOptions({ ...options });
   }
 
   async finalize(): Promise<TranscriptionResult> {

@@ -1,6 +1,26 @@
 #pragma once
 #include "transcriber_types.h"
+#include <string>
 #include <vector>
+
+struct DecodeOptions {
+    std::string language = "en";
+    bool translate = false;
+    bool detect_language = false;
+    int n_threads = 4;
+    float temperature = 0.0f;
+    float temperature_inc = 0.2f;
+    bool no_fallback = false;
+    int beam_size = -1;
+    int best_of = 5;
+    float entropy_thold = 2.4f;
+    float logprob_thold = -1.0f;
+    float no_speech_thold = 0.6f;
+    std::string prompt;
+    bool no_context = true;
+    bool suppress_blank = true;
+    bool suppress_nst = false;
+};
 
 struct TranscriberConfig {
     // Model loading
@@ -45,3 +65,4 @@ void transcriber_submit(Transcriber* t, const float* audio, int n_samples, doubl
 bool transcriber_try_get_result(Transcriber* t, TranscribeResult& result);
 TranscribeResult transcriber_wait_result(Transcriber* t);
 void transcriber_free(Transcriber* t);
+void transcriber_set_decode_options(Transcriber* t, const DecodeOptions& opts);

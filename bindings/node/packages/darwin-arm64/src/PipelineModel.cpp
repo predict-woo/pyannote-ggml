@@ -8,6 +8,8 @@ Napi::Object PipelineModel::Init(Napi::Env env, Napi::Object exports) {
     Napi::Function func = DefineClass(env, "PipelineModel", {
         InstanceMethod<&PipelineModel::Transcribe>("transcribe"),
         InstanceMethod<&PipelineModel::CreateSession>("createSession"),
+        InstanceMethod<&PipelineModel::SetLanguage>("setLanguage"),
+        InstanceMethod<&PipelineModel::SetDecodeOptions>("setDecodeOptions"),
         InstanceMethod<&PipelineModel::Close>("close"),
         InstanceAccessor<&PipelineModel::GetIsClosed>("isClosed"),
     });
@@ -235,4 +237,68 @@ Napi::Value PipelineModel::Close(const Napi::CallbackInfo& info) {
 
 Napi::Value PipelineModel::GetIsClosed(const Napi::CallbackInfo& info) {
     return Napi::Boolean::New(info.Env(), closed_);
+}
+
+Napi::Value PipelineModel::SetLanguage(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (closed_) {
+        Napi::Error::New(env, "Model is closed").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    if (info.Length() < 1 || !info[0].IsString()) {
+        Napi::TypeError::New(env, "Expected string argument").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    language_ = info[0].As<Napi::String>().Utf8Value();
+    return env.Undefined();
+}
+
+Napi::Value PipelineModel::SetDecodeOptions(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (closed_) {
+        Napi::Error::New(env, "Model is closed").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    if (info.Length() < 1 || !info[0].IsObject()) {
+        Napi::TypeError::New(env, "Expected object argument").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    Napi::Object opts = info[0].As<Napi::Object>();
+
+    auto readString = [&](const char* name, std::string& target) {
+        if (opts.Has(name) && opts.Get(name).IsString())
+            target = opts.Get(name).As<Napi::String>().Utf8Value();
+    };
+    auto readBool = [&](const char* name, bool& target) {
+        if (opts.Has(name) && opts.Get(name).IsBoolean())
+            target = opts.Get(name).As<Napi::Boolean>().Value();
+    };
+    auto readFloat = [&](const char* name, float& target) {
+        if (opts.Has(name) && opts.Get(name).IsNumber())
+            target = static_cast<float>(opts.Get(name).As<Napi::Number>().DoubleValue());
+    };
+    auto readInt = [&](const char* name, int& target) {
+        if (opts.Has(name) && opts.Get(name).IsNumber())
+            target = opts.Get(name).As<Napi::Number>().Int32Value();
+    };
+
+    readString("language", language_);
+    readBool("translate", translate_);
+    readBool("detectLanguage", detect_language_);
+    readInt("nThreads", n_threads_);
+    readFloat("temperature", temperature_);
+    readFloat("temperatureInc", temperature_inc_);
+    readBool("noFallback", no_fallback_);
+    readInt("beamSize", beam_size_);
+    readInt("bestOf", best_of_);
+    readFloat("entropyThold", entropy_thold_);
+    readFloat("logprobThold", logprob_thold_);
+    readFloat("noSpeechThold", no_speech_thold_);
+    readString("prompt", prompt_);
+    readBool("noContext", no_context_);
+    readBool("suppressBlank", suppress_blank_);
+    readBool("suppressNst", suppress_nst_);
+
+    return env.Undefined();
 }

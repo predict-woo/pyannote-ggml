@@ -35,6 +35,8 @@ Napi::Object PipelineSession::Init(Napi::Env env, Napi::Object exports) {
     Napi::Function func = DefineClass(env, "PipelineSession", {
         InstanceMethod<&PipelineSession::Push>("push"),
         InstanceMethod<&PipelineSession::Finalize>("finalize"),
+        InstanceMethod<&PipelineSession::SetLanguage>("setLanguage"),
+        InstanceMethod<&PipelineSession::SetDecodeOptions>("setDecodeOptions"),
         InstanceMethod<&PipelineSession::Close>("close"),
         InstanceAccessor<&PipelineSession::GetIsClosed>("isClosed"),
     });
@@ -282,4 +284,92 @@ Napi::Value PipelineSession::Close(const Napi::CallbackInfo& info) {
 
 Napi::Value PipelineSession::GetIsClosed(const Napi::CallbackInfo& info) {
     return Napi::Boolean::New(info.Env(), closed_);
+}
+
+void PipelineSession::PushDecodeOptionsToPipeline() {
+    if (!state_) return;
+    DecodeOptions opts;
+    opts.language = language_;
+    opts.translate = translate_;
+    opts.detect_language = detect_language_;
+    opts.n_threads = n_threads_;
+    opts.temperature = temperature_;
+    opts.temperature_inc = temperature_inc_;
+    opts.no_fallback = no_fallback_;
+    opts.beam_size = beam_size_;
+    opts.best_of = best_of_;
+    opts.entropy_thold = entropy_thold_;
+    opts.logprob_thold = logprob_thold_;
+    opts.no_speech_thold = no_speech_thold_;
+    opts.prompt = prompt_;
+    opts.no_context = no_context_;
+    opts.suppress_blank = suppress_blank_;
+    opts.suppress_nst = suppress_nst_;
+    pipeline_set_decode_options(state_, opts);
+}
+
+Napi::Value PipelineSession::SetLanguage(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (closed_) {
+        Napi::Error::New(env, "Session is closed").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    if (info.Length() < 1 || !info[0].IsString()) {
+        Napi::TypeError::New(env, "Expected string argument").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    language_ = info[0].As<Napi::String>().Utf8Value();
+    PushDecodeOptionsToPipeline();
+    return env.Undefined();
+}
+
+Napi::Value PipelineSession::SetDecodeOptions(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (closed_) {
+        Napi::Error::New(env, "Session is closed").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    if (info.Length() < 1 || !info[0].IsObject()) {
+        Napi::TypeError::New(env, "Expected object argument").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    Napi::Object opts = info[0].As<Napi::Object>();
+
+    auto readString = [&](const char* name, std::string& target) {
+        if (opts.Has(name) && opts.Get(name).IsString())
+            target = opts.Get(name).As<Napi::String>().Utf8Value();
+    };
+    auto readBool = [&](const char* name, bool& target) {
+        if (opts.Has(name) && opts.Get(name).IsBoolean())
+            target = opts.Get(name).As<Napi::Boolean>().Value();
+    };
+    auto readFloat = [&](const char* name, float& target) {
+        if (opts.Has(name) && opts.Get(name).IsNumber())
+            target = static_cast<float>(opts.Get(name).As<Napi::Number>().DoubleValue());
+    };
+    auto readInt = [&](const char* name, int& target) {
+        if (opts.Has(name) && opts.Get(name).IsNumber())
+            target = opts.Get(name).As<Napi::Number>().Int32Value();
+    };
+
+    readString("language", language_);
+    readBool("translate", translate_);
+    readBool("detectLanguage", detect_language_);
+    readInt("nThreads", n_threads_);
+    readFloat("temperature", temperature_);
+    readFloat("temperatureInc", temperature_inc_);
+    readBool("noFallback", no_fallback_);
+    readInt("beamSize", beam_size_);
+    readInt("bestOf", best_of_);
+    readFloat("entropyThold", entropy_thold_);
+    readFloat("logprobThold", logprob_thold_);
+    readFloat("noSpeechThold", no_speech_thold_);
+    readString("prompt", prompt_);
+    readBool("noContext", no_context_);
+    readBool("suppressBlank", suppress_blank_);
+    readBool("suppressNst", suppress_nst_);
+
+    PushDecodeOptionsToPipeline();
+    return env.Undefined();
 }

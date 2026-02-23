@@ -1,7 +1,7 @@
 import { accessSync } from 'node:fs';
 import { getBinding, type NativePipelineModel } from './binding.js';
 import { PipelineSession } from './PipelineSession.js';
-import type { ModelConfig, TranscriptionResult } from './types.js';
+import type { ModelConfig, TranscriptionResult, DecodeOptions } from './types.js';
 
 export class Pipeline {
   private native: NativePipelineModel;
@@ -32,6 +32,16 @@ export class Pipeline {
     if (!(audio instanceof Float32Array)) throw new TypeError('Expected Float32Array');
     if (audio.length === 0) throw new Error('Audio must not be empty');
     return this.native.transcribe(audio);
+  }
+
+  setLanguage(language: string): void {
+    if (this.native.isClosed) throw new Error('Pipeline is closed');
+    this.native.setLanguage(language);
+  }
+
+  setDecodeOptions(options: DecodeOptions): void {
+    if (this.native.isClosed) throw new Error('Pipeline is closed');
+    this.native.setDecodeOptions({ ...options });
   }
 
   createSession(): PipelineSession {

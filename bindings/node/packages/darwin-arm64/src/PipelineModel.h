@@ -23,6 +23,8 @@ private:
     Napi::Value CreateSession(const Napi::CallbackInfo& info);
     Napi::Value Close(const Napi::CallbackInfo& info);
     Napi::Value GetIsClosed(const Napi::CallbackInfo& info);
+    Napi::Value SetLanguage(const Napi::CallbackInfo& info);
+    Napi::Value SetDecodeOptions(const Napi::CallbackInfo& info);
 
     std::string seg_model_path_;
     std::string emb_model_path_;

@@ -6,6 +6,8 @@ const require = createRequire(import.meta.url);
 
 export interface NativePipelineModel {
   transcribe(audio: Float32Array): Promise<TranscriptionResult>;
+  setLanguage(language: string): void;
+  setDecodeOptions(options: Record<string, unknown>): void;
   createSession(
     segmentsCb: (segments: any[]) => void,
     audioCb: (audio: Float32Array) => void,
@@ -16,6 +18,8 @@ export interface NativePipelineModel {
 
 export interface NativePipelineSession {
   push(audio: Float32Array): Promise<boolean[]>;
+  setLanguage(language: string): void;
+  setDecodeOptions(options: Record<string, unknown>): void;
   finalize(): Promise<TranscriptionResult>;
   close(): void;
   isClosed: boolean;

@@ -280,3 +280,8 @@ void pipeline_free(PipelineState* state) {
 
     delete state;
 }
+
+void pipeline_set_decode_options(PipelineState* state, const DecodeOptions& opts) {
+    if (!state || !state->transcriber) return;
+    transcriber_set_decode_options(state->transcriber, opts);
+}

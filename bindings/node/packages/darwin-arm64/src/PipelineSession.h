@@ -28,8 +28,11 @@ private:
     Napi::Value Finalize(const Napi::CallbackInfo& info);
     Napi::Value Close(const Napi::CallbackInfo& info);
     Napi::Value GetIsClosed(const Napi::CallbackInfo& info);
+    Napi::Value SetLanguage(const Napi::CallbackInfo& info);
+    Napi::Value SetDecodeOptions(const Napi::CallbackInfo& info);
 
     void Cleanup();
+    void PushDecodeOptionsToPipeline();
 
     // Static callbacks for pipeline_init
     static void pipeline_cb(const std::vector<AlignedSegment>& segments,

@@ -28,12 +28,14 @@ struct Transcriber {
 
     bool shutdown = false;
     TranscriberConfig config;
+    DecodeOptions decode_opts;
 };
 
 static void worker_loop(Transcriber* t) {
     while (true) {
         std::vector<float> audio;
         double start_time = 0.0;
+        DecodeOptions opts;
 
         {
             std::unique_lock<std::mutex> lock(t->mtx);
@@ -44,6 +46,7 @@ static void worker_loop(Transcriber* t) {
             audio = std::move(t->pending_audio);
             start_time = t->pending_start_time;
             t->has_pending = false;
+            opts = t->decode_opts;  // snapshot ALL decode options under lock
         }
 
         TranscribeResult res;
@@ -58,7 +61,7 @@ static void worker_loop(Transcriber* t) {
         }
 
         // Choose strategy based on beam_size
-        auto strategy = (t->config.beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
+        auto strategy = (opts.beam_size > 1) ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY;
         auto params = whisper_full_default_params(strategy);
 
         // Pipeline-required overrides (never user-controllable)
@@ -67,34 +70,34 @@ static void worker_loop(Transcriber* t) {
         params.print_timestamps = false;
         params.token_timestamps = false;
 
-        // User-configurable params
-        params.language         = t->config.language;
-        params.n_threads        = t->config.n_threads;
-        params.translate        = t->config.translate;
-        params.detect_language  = t->config.detect_language;
-        if (t->config.detect_language) {
+        // User-configurable params (from snapshotted DecodeOptions)
+        params.language         = opts.language.empty() ? nullptr : opts.language.c_str();
+        params.n_threads        = opts.n_threads;
+        params.translate        = opts.translate;
+        params.detect_language  = opts.detect_language;
+        if (opts.detect_language) {
             params.language = "auto";
         }
 
         // Sampling
-        params.temperature      = t->config.temperature;
-        params.temperature_inc  = t->config.no_fallback ? 0.0f : t->config.temperature_inc;
+        params.temperature      = opts.temperature;
+        params.temperature_inc  = opts.no_fallback ? 0.0f : opts.temperature_inc;
         if (strategy == WHISPER_SAMPLING_BEAM_SEARCH) {
-            params.beam_search.beam_size = t->config.beam_size;
+            params.beam_search.beam_size = opts.beam_size;
         } else {
-            params.greedy.best_of = t->config.best_of;
+            params.greedy.best_of = opts.best_of;
         }
 
         // Thresholds
-        params.entropy_thold    = t->config.entropy_thold;
-        params.logprob_thold    = t->config.logprob_thold;
-        params.no_speech_thold  = t->config.no_speech_thold;
+        params.entropy_thold    = opts.entropy_thold;
+        params.logprob_thold    = opts.logprob_thold;
+        params.no_speech_thold  = opts.no_speech_thold;
 
         // Context
-        params.initial_prompt   = t->config.prompt;
-        params.no_context       = t->config.no_context;
-        params.suppress_blank   = t->config.suppress_blank;
-        params.suppress_nst     = t->config.suppress_nst;
+        params.initial_prompt   = opts.prompt.empty() ? nullptr : opts.prompt.c_str();
+        params.no_context       = opts.no_context;
+        params.suppress_blank   = opts.suppress_blank;
+        params.suppress_nst     = opts.suppress_nst;
 
         int ret = whisper_full(t->ctx, params, audio.data(), (int)audio.size());
         if (ret != 0) {
@@ -152,6 +155,22 @@ Transcriber* transcriber_init(const TranscriberConfig& config) {
     auto* t = new Transcriber();
     t->ctx = ctx;
     t->config = config;
+    t->decode_opts.language = config.language ? config.language : "";
+    t->decode_opts.translate = config.translate;
+    t->decode_opts.detect_language = config.detect_language;
+    t->decode_opts.n_threads = config.n_threads;
+    t->decode_opts.temperature = config.temperature;
+    t->decode_opts.temperature_inc = config.temperature_inc;
+    t->decode_opts.no_fallback = config.no_fallback;
+    t->decode_opts.beam_size = config.beam_size;
+    t->decode_opts.best_of = config.best_of;
+    t->decode_opts.entropy_thold = config.entropy_thold;
+    t->decode_opts.logprob_thold = config.logprob_thold;
+    t->decode_opts.no_speech_thold = config.no_speech_thold;
+    t->decode_opts.prompt = config.prompt ? config.prompt : "";
+    t->decode_opts.no_context = config.no_context;
+    t->decode_opts.suppress_blank = config.suppress_blank;
+    t->decode_opts.suppress_nst = config.suppress_nst;
     t->worker = std::thread(worker_loop, t);
     return t;
 }
@@ -179,6 +198,12 @@ TranscribeResult transcriber_wait_result(Transcriber* t) {
     TranscribeResult res = std::move(t->result);
     t->has_result = false;
     return res;
+}
+
+void transcriber_set_decode_options(Transcriber* t, const DecodeOptions& opts) {
+    if (!t) return;
+    std::lock_guard<std::mutex> lock(t->mtx);
+    t->decode_opts = opts;
 }
 
 void transcriber_free(Transcriber* t) {

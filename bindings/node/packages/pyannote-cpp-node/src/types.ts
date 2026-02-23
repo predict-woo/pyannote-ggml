@@ -74,6 +74,41 @@ export interface ModelConfig {
   suppressNst?: boolean;
 }
 
+export interface DecodeOptions {
+  /** Language code (e.g., 'en', 'zh'). Omit for auto-detect. */
+  language?: string;
+  /** Translate non-English speech to English */
+  translate?: boolean;
+  /** Auto-detect spoken language. Overrides 'language' when true. */
+  detectLanguage?: boolean;
+  /** Number of threads for Whisper inference */
+  nThreads?: number;
+  /** Sampling temperature. 0.0 = greedy deterministic. */
+  temperature?: number;
+  /** Temperature increment for fallback retries */
+  temperatureInc?: number;
+  /** Disable temperature fallback. If true, temperatureInc is ignored. */
+  noFallback?: boolean;
+  /** Beam search size. -1 uses greedy decoding. >1 enables beam search. */
+  beamSize?: number;
+  /** Best-of-N sampling candidates for greedy decoding */
+  bestOf?: number;
+  /** Entropy threshold for decoder fallback */
+  entropyThold?: number;
+  /** Log probability threshold for decoder fallback */
+  logprobThold?: number;
+  /** No-speech probability threshold */
+  noSpeechThold?: number;
+  /** Initial prompt text to condition the decoder */
+  prompt?: string;
+  /** Don't use previous segment as context for next segment */
+  noContext?: boolean;
+  /** Suppress blank outputs at the beginning of segments */
+  suppressBlank?: boolean;
+  /** Suppress non-speech tokens */
+  suppressNst?: boolean;
+}
+
 export interface AlignedSegment {
   speaker: string;
   start: number;

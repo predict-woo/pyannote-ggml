@@ -26,3 +26,4 @@ PipelineState* pipeline_init(const PipelineConfig& config,
 std::vector<bool> pipeline_push(PipelineState* state, const float* samples, int n_samples);
 void pipeline_finalize(PipelineState* state);
 void pipeline_free(PipelineState* state);
+void pipeline_set_decode_options(PipelineState* state, const DecodeOptions& opts);
