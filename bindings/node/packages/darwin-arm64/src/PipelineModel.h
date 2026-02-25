@@ -20,6 +20,7 @@ public:
 
 private:
     Napi::Value Transcribe(const Napi::CallbackInfo& info);
+    Napi::Value TranscribeOffline(const Napi::CallbackInfo& info);
     Napi::Value CreateSession(const Napi::CallbackInfo& info);
     Napi::Value Close(const Napi::CallbackInfo& info);
     Napi::Value GetIsClosed(const Napi::CallbackInfo& info);

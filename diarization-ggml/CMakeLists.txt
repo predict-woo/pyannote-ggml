@@ -119,6 +119,7 @@ target_link_libraries(transcription-lib INTERFACE diarization-lib whisper)
 # Pipeline library (transcription + diarization pipeline)
 add_library(pipeline-lib STATIC
     src/pipeline.cpp
+    src/offline_pipeline.cpp
     src/silence_filter.cpp
     src/audio_buffer.cpp
     src/segment_detector.cpp
@@ -138,6 +139,7 @@ target_link_libraries(pipeline-lib PUBLIC
 add_executable(transcribe
     src/main_transcribe.cpp
     src/pipeline.cpp
+    src/offline_pipeline.cpp
     src/silence_filter.cpp
     src/audio_buffer.cpp
     src/segment_detector.cpp
@@ -175,6 +177,7 @@ set_target_properties(test_transcriber PROPERTIES
 add_executable(test_pipeline
     tests/test_pipeline.cpp
     src/pipeline.cpp
+    src/offline_pipeline.cpp
     src/silence_filter.cpp
     src/audio_buffer.cpp
     src/segment_detector.cpp

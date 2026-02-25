@@ -34,6 +34,13 @@ export class Pipeline {
     return this.native.transcribe(audio);
   }
 
+  async transcribeOffline(audio: Float32Array): Promise<TranscriptionResult> {
+    if (this.native.isClosed) throw new Error('Pipeline is closed');
+    if (!(audio instanceof Float32Array)) throw new TypeError('Expected Float32Array');
+    if (audio.length === 0) throw new Error('Audio must not be empty');
+    return this.native.transcribeOffline(audio);
+  }
+
   setLanguage(language: string): void {
     if (this.native.isClosed) throw new Error('Pipeline is closed');
     this.native.setLanguage(language);

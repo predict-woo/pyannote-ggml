@@ -23,6 +23,7 @@ struct DiarizationResult {
 };
 
 bool diarize(const DiarizationConfig& config, DiarizationResult& result);
+bool diarize_from_samples(const DiarizationConfig& config, const float* audio, int n_samples, DiarizationResult& result);
 
 struct embedding_coreml_context;
 namespace embedding {

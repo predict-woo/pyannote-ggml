@@ -254,10 +254,10 @@ static std::string extract_uri(const std::string& audio_path) {
 }
 
 // ============================================================================
-// Main pipeline — ports SpeakerDiarization.apply() from speaker_diarization.py
+// Buffer-based pipeline — core implementation used by both file and buffer APIs
 // ============================================================================
 
-bool diarize(const DiarizationConfig& config, DiarizationResult& result) {
+bool diarize_from_samples(const DiarizationConfig& config, const float* audio, int n_samples, DiarizationResult& result) {
     using Clock = std::chrono::high_resolution_clock;
     
     // Timing variables for each stage
@@ -274,33 +274,16 @@ bool diarize(const DiarizationConfig& config, DiarizationResult& result) {
     double t_postprocess_ms = 0.0;
     
     auto t_total_start = Clock::now();
-
-    // ====================================================================
-    // Step 1: Load audio WAV file
-    // ====================================================================
-
     auto t_stage_start = Clock::now();
-    std::vector<float> audio_samples;
-    uint32_t sample_rate = 0;
-    if (!load_wav_file(config.audio_path, audio_samples, sample_rate)) {
-        return false;
-    }
-    if (sample_rate != SAMPLE_RATE) {
-        fprintf(stderr, "Error: expected %d Hz audio, got %u Hz\n",
-                SAMPLE_RATE, sample_rate);
-        return false;
-    }
+    auto t_stage_end   = Clock::now();
 
-    const int num_samples = static_cast<int>(audio_samples.size());
-    const double audio_duration = static_cast<double>(num_samples) / SAMPLE_RATE;
-    
-    auto t_stage_end = Clock::now();
-    t_load_audio_ms = std::chrono::duration<double, std::milli>(t_stage_end - t_stage_start).count();
+    // Audio parameters derived from buffer
+    const double audio_duration = static_cast<double>(n_samples) / SAMPLE_RATE;
     
     int audio_mins = static_cast<int>(audio_duration) / 60;
     int audio_secs = static_cast<int>(audio_duration) % 60;
     fprintf(stderr, "Audio: %.2fs (%d:%02d), %d samples\n", 
-            audio_duration, audio_mins, audio_secs, num_samples);
+            audio_duration, audio_mins, audio_secs, n_samples);
 
     // ====================================================================
     // Step 2: Load segmentation model (CoreML or GGML)
@@ -438,13 +421,13 @@ bool diarize(const DiarizationConfig& config, DiarizationResult& result) {
         std::vector<float> cropped(CHUNK_SAMPLES, 0.0f);
         for (int c = 0; c < num_chunks; c++) {
             const int chunk_start = c * STEP_SAMPLES;
-            int copy_len = num_samples - chunk_start;
+            int copy_len = n_samples - chunk_start;
             if (copy_len > CHUNK_SAMPLES) copy_len = CHUNK_SAMPLES;
             if (copy_len < 0) copy_len = 0;
 
             std::fill(cropped.begin(), cropped.end(), 0.0f);
             if (copy_len > 0) {
-                std::memcpy(cropped.data(), audio_samples.data() + chunk_start,
+                std::memcpy(cropped.data(), audio + chunk_start,
                             static_cast<size_t>(copy_len) * sizeof(float));
             }
 
@@ -554,7 +537,7 @@ bool diarize(const DiarizationConfig& config, DiarizationResult& result) {
         if (max_count == 0) {
             fprintf(stderr, "Speaker count: no speakers detected\n");
             result.segments.clear();
-            std::string uri = extract_uri(config.audio_path);
+            std::string uri = config.audio_path.empty() ? "audio" : extract_uri(config.audio_path);
             std::vector<diarization::RTTMSegment> empty;
             if (config.output_path.empty()) {
                 diarization::write_rttm_stdout(empty, uri);
@@ -579,7 +562,7 @@ bool diarize(const DiarizationConfig& config, DiarizationResult& result) {
         fprintf(stderr, "Embeddings: %d chunks... ", num_chunks);
         fflush(stderr);
         if (!extract_embeddings(
-                audio_samples.data(), num_samples,
+                audio, n_samples,
                 binarized.data(), num_chunks, FRAMES_PER_CHUNK, NUM_LOCAL_SPEAKERS,
 #ifdef EMBEDDING_USE_COREML
                 coreml_ctx,
@@ -606,9 +589,6 @@ bool diarize(const DiarizationConfig& config, DiarizationResult& result) {
         emb_model.ctx = nullptr;
 #endif
 
-        // Can also free audio samples now
-        audio_samples.clear();
-        audio_samples.shrink_to_fit();
 
         // ================================================================
         // Step 9: Filter embeddings
@@ -912,7 +892,7 @@ bool diarize(const DiarizationConfig& config, DiarizationResult& result) {
         // Step 21: Write RTTM output
         // ================================================================
 
-        std::string uri = extract_uri(config.audio_path);
+        std::string uri = config.audio_path.empty() ? "audio" : extract_uri(config.audio_path);
 
         if (config.output_path.empty()) {
             diarization::write_rttm_stdout(rttm_segments, uri);
@@ -984,4 +964,23 @@ cleanup:
     if (seg_state.sched) segmentation::state_free(seg_state);
     if (seg_model.ctx) segmentation::model_free(seg_model);
     return false;
+}
+
+// ============================================================================
+// File-based pipeline — loads WAV and delegates to buffer-based pipeline
+// ============================================================================
+
+bool diarize(const DiarizationConfig& config, DiarizationResult& result) {
+    std::vector<float> audio_samples;
+    uint32_t sample_rate = 0;
+    if (!load_wav_file(config.audio_path, audio_samples, sample_rate)) {
+        return false;
+    }
+    if (sample_rate != SAMPLE_RATE) {
+        fprintf(stderr, "Error: expected %d Hz audio, got %u Hz\n",
+                SAMPLE_RATE, sample_rate);
+        return false;
+    }
+    return diarize_from_samples(config, audio_samples.data(),
+                                static_cast<int>(audio_samples.size()), result);
 }

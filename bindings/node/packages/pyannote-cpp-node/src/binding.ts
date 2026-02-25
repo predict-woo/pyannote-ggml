@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 
 export interface NativePipelineModel {
   transcribe(audio: Float32Array): Promise<TranscriptionResult>;
+  transcribeOffline(audio: Float32Array): Promise<TranscriptionResult>;
   setLanguage(language: string): void;
   setDecodeOptions(options: Record<string, unknown>): void;
   createSession(

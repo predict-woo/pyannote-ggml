@@ -1,12 +1,14 @@
 #include "PipelineModel.h"
 #include "PipelineSession.h"
 #include "TranscribeWorker.h"
+#include "OfflineTranscribeWorker.h"
 
 Napi::FunctionReference PipelineModel::constructor;
 
 Napi::Object PipelineModel::Init(Napi::Env env, Napi::Object exports) {
     Napi::Function func = DefineClass(env, "PipelineModel", {
         InstanceMethod<&PipelineModel::Transcribe>("transcribe"),
+        InstanceMethod<&PipelineModel::TranscribeOffline>("transcribeOffline"),
         InstanceMethod<&PipelineModel::CreateSession>("createSession"),
         InstanceMethod<&PipelineModel::SetLanguage>("setLanguage"),
         InstanceMethod<&PipelineModel::SetDecodeOptions>("setDecodeOptions"),
@@ -301,4 +303,50 @@ Napi::Value PipelineModel::SetDecodeOptions(const Napi::CallbackInfo& info) {
     readBool("suppressNst", suppress_nst_);
 
     return env.Undefined();
+}
+
+Napi::Value PipelineModel::TranscribeOffline(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+
+    if (closed_) {
+        Napi::Error::New(env, "Model is closed").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    if (busy_) {
+        Napi::Error::New(env, "Model is busy with another operation")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    if (info.Length() < 1 || !info[0].IsTypedArray()) {
+        Napi::TypeError::New(env, "Expected Float32Array argument")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    Napi::TypedArray typedArr = info[0].As<Napi::TypedArray>();
+    if (typedArr.TypedArrayType() != napi_float32_array) {
+        Napi::TypeError::New(env, "Expected Float32Array argument")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    Napi::Float32Array float32Arr = info[0].As<Napi::Float32Array>();
+    size_t length = float32Arr.ElementLength();
+
+    if (length == 0) {
+        Napi::TypeError::New(env, "Float32Array must not be empty")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    std::vector<float> audio(float32Arr.Data(), float32Arr.Data() + length);
+
+    busy_ = true;
+    auto deferred = Napi::Promise::Deferred::New(env);
+    auto* worker = new OfflineTranscribeWorker(env, this, std::move(audio), deferred);
+    worker->Queue();
+
+    return deferred.Promise();
 }

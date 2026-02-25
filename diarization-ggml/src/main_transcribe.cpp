@@ -1,4 +1,5 @@
 #include "pipeline.h"
+#include "offline_pipeline.h"
 
 #include <algorithm>
 #include <atomic>
@@ -322,6 +323,7 @@ static void print_usage(const char* program) {
     fprintf(stderr, "  --rttm <path>           Output RTTM diarization file\n");
     fprintf(stderr, "  --realtime              Pace audio at 1x real-time speed (for profiling)\n");
     fprintf(stderr, "  --stats                 Print memory and CPU usage statistics\n");
+    fprintf(stderr, "  --offline               Run Whisper on full audio + offline diarization (non-streaming)\n");
     fprintf(stderr, "  --help                  Print this help message\n");
 }
 
@@ -348,6 +350,7 @@ int main(int argc, char** argv) {
     const char* language = "en";
     bool realtime = false;
     bool stats = false;
+    bool offline = false;
     std::string output_path;
 
     int i = 1;
@@ -381,6 +384,8 @@ int main(int argc, char** argv) {
             rttm_path = argv[++i];
         } else if (arg == "--realtime") {
             realtime = true;
+        } else if (arg == "--offline") {
+            offline = true;
         } else if (arg == "--stats") {
             stats = true;
         } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
@@ -408,6 +413,62 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Error: --seg-model, --emb-model, --whisper-model, and --plda are required\n\n");
         print_usage(argv[0]);
         return 1;
+    }
+
+
+    if (offline) {
+        OfflinePipelineConfig offline_config{};
+        offline_config.seg_model_path  = seg_model;
+        offline_config.emb_model_path  = emb_model;
+        offline_config.plda_path       = plda_model;
+        if (seg_coreml) offline_config.seg_coreml_path = seg_coreml;
+        if (emb_coreml) offline_config.coreml_path     = emb_coreml;
+        offline_config.transcriber.whisper_model_path = whisper_model;
+        offline_config.transcriber.n_threads          = 4;
+        offline_config.transcriber.language           = language;
+
+        std::vector<float> audio;
+        uint32_t sample_rate = 0;
+        if (!load_wav_file(audio_path, audio, sample_rate)) {
+            return 1;
+        }
+        if (sample_rate != SAMPLE_RATE) {
+            fprintf(stderr, "Error: expected %d Hz audio, got %u Hz\n", SAMPLE_RATE, sample_rate);
+            return 1;
+        }
+
+        const auto t0 = std::chrono::steady_clock::now();
+        OfflinePipelineResult result = offline_transcribe(offline_config, audio.data(), static_cast<int>(audio.size()));
+        const auto t1 = std::chrono::steady_clock::now();
+
+        if (!result.valid) {
+            fprintf(stderr, "Error: offline pipeline failed\n");
+            return 1;
+        }
+
+        if (output_path.empty()) {
+            write_segments_json(stdout, result.segments);
+        } else {
+            if (!write_segments_json_file(output_path, result.segments)) {
+                fprintf(stderr, "Error: could not open output file '%s'\n", output_path.c_str());
+                return 1;
+            }
+        }
+
+        if (rttm_path) {
+            const std::string file_id = audio_file_id_from_path(audio_path);
+            if (!write_segments_rttm_file(rttm_path, file_id, result.segments)) {
+                fprintf(stderr, "Error: could not open RTTM output file '%s'\n", rttm_path);
+                return 1;
+            }
+        }
+
+        const double total_audio_s = static_cast<double>(audio.size()) / SAMPLE_RATE;
+        const double elapsed_s = std::chrono::duration<double>(t1 - t0).count();
+        const double rtf = total_audio_s > 0.0 ? elapsed_s / total_audio_s : 0.0;
+        fprintf(stderr, "Timing: total=%.3fs audio=%.3fs rtf=%.4f\n", elapsed_s, total_audio_s, rtf);
+
+        return 0;
     }
 
     struct CallbackCtx {
