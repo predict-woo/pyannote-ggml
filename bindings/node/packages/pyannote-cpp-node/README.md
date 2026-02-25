@@ -7,7 +7,7 @@ Node.js native bindings for integrated Whisper transcription + speaker diarizati
 
 ## Overview
 
-`pyannote-cpp-node` exposes the integrated C++ pipeline that combines streaming diarization and Whisper transcription into a single API.
+`pyannote-cpp-node` exposes the integrated C++ pipeline that combines Whisper transcription and speaker diarization into a single API.
 
 Given 16 kHz mono PCM audio (`Float32Array`), it produces cumulative and final transcript segments shaped as:
 
@@ -15,14 +15,15 @@ Given 16 kHz mono PCM audio (`Float32Array`), it produces cumulative and final t
 - segment start/duration in seconds
 - segment text
 
-The API supports both one-shot processing (`transcribe`) and incremental streaming (`createSession` + `push`/`finalize`). All heavy operations are asynchronous and run on libuv worker threads.
+The API supports three modes: **offline** batch processing (`transcribeOffline`), **one-shot** streaming (`transcribe`), and **incremental** streaming (`createSession` + `push`/`finalize`). All heavy operations are asynchronous and run on libuv worker threads.
 
 ## Features
 
 - Integrated transcription + diarization in one pipeline
 - Speaker-labeled transcript segments with sentence-level text
-- One-shot and streaming APIs with the same output schema
-- Incremental `segments` events plus separate real-time `audio` chunk streaming
+- **Offline mode**: runs Whisper on the full audio at once + offline diarization (fastest for batch)
+- **One-shot mode**: streaming pipeline with automatic chunking
+- **Streaming mode**: incremental push/finalize with real-time `segments` events and `audio` chunk streaming
 - Deterministic output for the same audio/models/config
 - CoreML-accelerated inference on macOS
 - TypeScript-first API with complete type definitions
@@ -68,7 +69,9 @@ const pipeline = await Pipeline.load({
 });
 
 const audio = loadAudioAsFloat32Array('./audio-16khz-mono.wav');
-const result = await pipeline.transcribe(audio);
+
+// Offline mode — fastest for batch processing
+const result = await pipeline.transcribeOffline(audio);
 
 for (const segment of result.segments) {
   const end = segment.start + segment.duration;
@@ -87,6 +90,7 @@ pipeline.close();
 ```typescript
 class Pipeline {
   static async load(config: ModelConfig): Promise<Pipeline>;
+  async transcribeOffline(audio: Float32Array): Promise<TranscriptionResult>;
   async transcribe(audio: Float32Array): Promise<TranscriptionResult>;
   setLanguage(language: string): void;
   setDecodeOptions(options: DecodeOptions): void;
@@ -100,9 +104,13 @@ class Pipeline {
 
 Validates model paths and initializes native pipeline resources.
 
+#### `async transcribeOffline(audio: Float32Array): Promise<TranscriptionResult>`
+
+Runs Whisper on the **entire** audio buffer in a single `whisper_full()` call, then runs offline diarization and WhisperX-style speaker alignment. This is the fastest mode for batch processing — no streaming infrastructure is involved.
+
 #### `async transcribe(audio: Float32Array): Promise<TranscriptionResult>`
 
-Runs one-shot transcription + diarization on the full audio buffer.
+Runs one-shot transcription + diarization using the streaming pipeline internally (pushes 1-second chunks then finalizes).
 
 #### `setLanguage(language: string): void`
 
@@ -361,7 +369,34 @@ export interface TranscriptionResult {
 
 ## Usage Examples
 
-### One-shot transcription
+### Offline transcription (recommended for batch)
+
+```typescript
+import { Pipeline } from 'pyannote-cpp-node';
+
+async function runOffline(audio: Float32Array) {
+  const pipeline = await Pipeline.load({
+    segModelPath: './models/segmentation.gguf',
+    embModelPath: './models/embedding.gguf',
+    pldaPath: './models/plda.gguf',
+    coremlPath: './models/embedding.mlpackage',
+    segCoremlPath: './models/segmentation.mlpackage',
+    whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
+  });
+
+  // Runs Whisper on full audio at once + offline diarization
+  const result = await pipeline.transcribeOffline(audio);
+
+  for (const seg of result.segments) {
+    const end = seg.start + seg.duration;
+    console.log(`[${seg.speaker}] ${seg.start.toFixed(2)}-${end.toFixed(2)} ${seg.text.trim()}`);
+  }
+
+  pipeline.close();
+}
+```
+
+### One-shot transcription (streaming internals)
 
 ```typescript
 import { Pipeline } from 'pyannote-cpp-node';
@@ -376,6 +411,7 @@ async function runOneShot(audio: Float32Array) {
     whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
   });
 
+  // Uses streaming pipeline internally (push 1s chunks + finalize)
   const result = await pipeline.transcribe(audio);
 
   for (const seg of result.segments) {
@@ -556,7 +592,15 @@ All API methods expect decoded PCM samples; file decoding/resampling is handled 
 
 ## Architecture
 
-The integrated pipeline runs in 7 stages:
+### Offline mode (`transcribeOffline`)
+
+1. Single `whisper_full()` call on entire audio
+2. Offline diarization (segmentation → powerset → embeddings → PLDA → AHC → VBx)
+3. WhisperX-style alignment (speaker assignment by maximum segment overlap)
+
+### Streaming mode (`transcribe` / `createSession`)
+
+The streaming pipeline runs in 7 stages:
 
 1. VAD silence filter (optional compression of long silence)
 2. Audio buffer (stream-safe FIFO with timestamp tracking)
@@ -568,8 +612,9 @@ The integrated pipeline runs in 7 stages:
 
 ## Performance
 
+- Offline transcription + diarization: **~12x real-time** (30s audio in 2.5s)
 - Diarization only: **39x real-time**
-- Integrated transcription + diarization: **~14.6x real-time**
+- Integrated streaming transcription + diarization: **~14.6x real-time**
 - 45-minute Korean meeting test (6 speakers): **2713s audio in 186s**
 - Each Whisper segment maps 1:1 to a speaker-labeled segment (no merging)
 - Speaker confusion rate: **2.55%**
