@@ -11,7 +11,8 @@ TranscribeWorker::TranscribeWorker(Napi::Env env,
       model_(model),
       config_(model->BuildConfig()),
       audio_(std::move(audio)),
-      deferred_(deferred) {}
+      deferred_(deferred),
+      cache_(model->GetCache()) {}
 
 void TranscribeWorker::OnPipelineCallback(
     const std::vector<AlignedSegment>& segments,
@@ -21,7 +22,12 @@ void TranscribeWorker::OnPipelineCallback(
 }
 
 void TranscribeWorker::Execute() {
-    PipelineState* state = pipeline_init(config_, OnPipelineCallback, nullptr, &cb_data_);
+    PipelineState* state;
+    if (cache_) {
+        state = pipeline_init_with_cache(config_, cache_, OnPipelineCallback, nullptr, &cb_data_);
+    } else {
+        state = pipeline_init(config_, OnPipelineCallback, nullptr, &cb_data_);
+    }
     if (!state) {
         SetError("Failed to initialize pipeline state");
         return;

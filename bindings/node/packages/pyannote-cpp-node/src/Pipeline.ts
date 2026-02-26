@@ -24,6 +24,7 @@ export class Pipeline {
 
     const binding = getBinding();
     const native = new binding.PipelineModel(config);
+    await native.loadModels();
     return new Pipeline(native);
   }
 

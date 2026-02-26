@@ -2,6 +2,8 @@
 #include "PipelineSession.h"
 #include "TranscribeWorker.h"
 #include "OfflineTranscribeWorker.h"
+#include "LoadModelsWorker.h"
+#include "model_cache.h"
 
 Napi::FunctionReference PipelineModel::constructor;
 
@@ -13,7 +15,9 @@ Napi::Object PipelineModel::Init(Napi::Env env, Napi::Object exports) {
         InstanceMethod<&PipelineModel::SetLanguage>("setLanguage"),
         InstanceMethod<&PipelineModel::SetDecodeOptions>("setDecodeOptions"),
         InstanceMethod<&PipelineModel::Close>("close"),
+        InstanceMethod<&PipelineModel::LoadModels>("loadModels"),
         InstanceAccessor<&PipelineModel::GetIsClosed>("isClosed"),
+        InstanceAccessor<&PipelineModel::GetIsLoaded>("isLoaded"),
     });
 
     constructor = Napi::Persistent(func);
@@ -125,6 +129,10 @@ PipelineModel::PipelineModel(const Napi::CallbackInfo& info)
 }
 
 PipelineModel::~PipelineModel() {
+    if (cache_) {
+        model_cache_free(cache_);
+        cache_ = nullptr;
+    }
     if (!closed_) {
         closed_ = true;
     }
@@ -233,6 +241,10 @@ Napi::Value PipelineModel::CreateSession(const Napi::CallbackInfo& info) {
 }
 
 Napi::Value PipelineModel::Close(const Napi::CallbackInfo& info) {
+    if (cache_) {
+        model_cache_free(cache_);
+        cache_ = nullptr;
+    }
     closed_ = true;
     return info.Env().Undefined();
 }
@@ -349,4 +361,39 @@ Napi::Value PipelineModel::TranscribeOffline(const Napi::CallbackInfo& info) {
     worker->Queue();
 
     return deferred.Promise();
+}
+
+Napi::Value PipelineModel::LoadModels(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+
+    if (closed_) {
+        Napi::Error::New(env, "Model is closed").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    if (loaded_) {
+        Napi::Error::New(env, "Models are already loaded").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    PipelineConfig pc = BuildConfig();
+
+    ModelCacheConfig cache_config{};
+    cache_config.seg_model_path = pc.diarization.seg_model_path;
+    cache_config.emb_model_path = pc.diarization.emb_model_path;
+    cache_config.plda_path = pc.diarization.plda_path;
+    cache_config.seg_coreml_path = pc.diarization.seg_coreml_path;
+    cache_config.coreml_path = pc.diarization.coreml_path;
+    cache_config.transcriber = pc.transcriber;
+    cache_config.vad_model_path = pc.vad_model_path;
+
+    auto deferred = Napi::Promise::Deferred::New(env);
+    auto* worker = new LoadModelsWorker(env, this, std::move(cache_config), deferred);
+    worker->Queue();
+
+    return deferred.Promise();
+}
+
+Napi::Value PipelineModel::GetIsLoaded(const Napi::CallbackInfo& info) {
+    return Napi::Boolean::New(info.Env(), loaded_);
 }

@@ -61,6 +61,10 @@ struct TranscriberConfig {
 struct Transcriber;
 
 Transcriber* transcriber_init(const TranscriberConfig& config);
+
+// Initialize transcriber with a pre-loaded whisper_context (borrowed, not freed on transcriber_free).
+// The whisper_context must remain valid until transcriber_free() is called.
+Transcriber* transcriber_init_with_context(const TranscriberConfig& config, struct whisper_context* ctx);
 void transcriber_submit(Transcriber* t, const float* audio, int n_samples, double buffer_start_time);
 bool transcriber_try_get_result(Transcriber* t, TranscribeResult& result);
 TranscribeResult transcriber_wait_result(Transcriber* t);

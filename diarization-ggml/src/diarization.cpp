@@ -984,3 +984,487 @@ bool diarize(const DiarizationConfig& config, DiarizationResult& result) {
     return diarize_from_samples(config, audio_samples.data(),
                                 static_cast<int>(audio_samples.size()), result);
 }
+
+#if defined(SEGMENTATION_USE_COREML) && defined(EMBEDDING_USE_COREML)
+// ============================================================================
+// Buffer-based pipeline with pre-loaded models — CoreML only
+// ============================================================================
+
+bool diarize_from_samples_with_models(
+    const DiarizationConfig& config,
+    const float* audio, int n_samples,
+    struct segmentation_coreml_context* seg_ctx,
+    struct embedding_coreml_context* emb_ctx,
+    const diarization::PLDAModel& plda,
+    DiarizationResult& result)
+{
+    using Clock = std::chrono::high_resolution_clock;
+
+    double t_segmentation_ms = 0.0;
+    double t_powerset_ms = 0.0;
+    double t_speaker_count_ms = 0.0;
+    double t_embeddings_ms = 0.0;
+    double t_filter_plda_ms = 0.0;
+    double t_clustering_ms = 0.0;
+    double t_postprocess_ms = 0.0;
+
+    auto t_total_start = Clock::now();
+    auto t_stage_start = Clock::now();
+    auto t_stage_end   = Clock::now();
+
+    const double audio_duration = static_cast<double>(n_samples) / SAMPLE_RATE;
+
+    int audio_mins = static_cast<int>(audio_duration) / 60;
+    int audio_secs = static_cast<int>(audio_duration) % 60;
+    fprintf(stderr, "Audio: %.2fs (%d:%02d), %d samples\n",
+            audio_duration, audio_mins, audio_secs, n_samples);
+
+    // ====================================================================
+    // Step 1: Sliding window segmentation (CoreML)
+    // ====================================================================
+
+    t_stage_start = Clock::now();
+    int num_chunks = std::max(1,
+        1 + static_cast<int>(std::ceil((audio_duration - CHUNK_DURATION) / CHUNK_STEP)));
+    fprintf(stderr, "Segmentation: %d chunks... ", num_chunks);
+    fflush(stderr);
+
+    std::vector<float> seg_logits(
+        static_cast<size_t>(num_chunks) * FRAMES_PER_CHUNK * NUM_POWERSET_CLASSES);
+
+    {
+        std::vector<float> cropped(CHUNK_SAMPLES, 0.0f);
+        for (int c = 0; c < num_chunks; c++) {
+            const int chunk_start = c * STEP_SAMPLES;
+            int copy_len = n_samples - chunk_start;
+            if (copy_len > CHUNK_SAMPLES) copy_len = CHUNK_SAMPLES;
+            if (copy_len < 0) copy_len = 0;
+
+            std::fill(cropped.begin(), cropped.end(), 0.0f);
+            if (copy_len > 0) {
+                std::memcpy(cropped.data(), audio + chunk_start,
+                            static_cast<size_t>(copy_len) * sizeof(float));
+            }
+
+            float* output = seg_logits.data() +
+                static_cast<size_t>(c) * FRAMES_PER_CHUNK * NUM_POWERSET_CLASSES;
+
+            segmentation_coreml_infer(seg_ctx,
+                                      cropped.data(), CHUNK_SAMPLES,
+                                      output,
+                                      FRAMES_PER_CHUNK * NUM_POWERSET_CLASSES);
+
+            if ((c + 1) % 50 == 0 || c + 1 == num_chunks) {
+                fprintf(stderr, "%d/%d chunks\r", c + 1, num_chunks);
+                fflush(stderr);
+            }
+        }
+    }
+
+    t_stage_end = Clock::now();
+    t_segmentation_ms = std::chrono::duration<double, std::milli>(t_stage_end - t_stage_start).count();
+    fprintf(stderr, "done [%.0f ms]\n", t_segmentation_ms);
+
+    {
+        // ================================================================
+        // Step 2: Powerset -> multilabel
+        // ================================================================
+
+        t_stage_start = Clock::now();
+        std::vector<float> binarized(
+            static_cast<size_t>(num_chunks) * FRAMES_PER_CHUNK * NUM_LOCAL_SPEAKERS);
+        diarization::powerset_to_multilabel(
+            seg_logits.data(), num_chunks, FRAMES_PER_CHUNK, binarized.data());
+
+        seg_logits.clear();
+        seg_logits.shrink_to_fit();
+
+        t_stage_end = Clock::now();
+        t_powerset_ms = std::chrono::duration<double, std::milli>(t_stage_end - t_stage_start).count();
+        fprintf(stderr, "Powerset: done [%.0f ms]\n", t_powerset_ms);
+
+        // ================================================================
+        // Step 3: Compute frame-level speaker count
+        // ================================================================
+
+        t_stage_start = Clock::now();
+        diarization::SlidingWindowParams chunk_window = {0.0, CHUNK_DURATION, CHUNK_STEP};
+        diarization::SlidingWindowParams frame_window = {chunk_window.start, FRAME_DURATION, FRAME_STEP};
+
+        std::vector<int> count;
+        int total_frames = 0;
+        diarization::compute_speaker_count(
+            binarized.data(), num_chunks, FRAMES_PER_CHUNK, NUM_LOCAL_SPEAKERS,
+            chunk_window, frame_window, count, total_frames);
+
+        int max_count = 0;
+        for (int i = 0; i < total_frames; i++) {
+            if (count[i] > max_count) max_count = count[i];
+        }
+
+        t_stage_end = Clock::now();
+        t_speaker_count_ms = std::chrono::duration<double, std::milli>(t_stage_end - t_stage_start).count();
+
+        if (max_count == 0) {
+            fprintf(stderr, "Speaker count: no speakers detected\n");
+            result.segments.clear();
+            std::string uri = config.audio_path.empty() ? "audio" : extract_uri(config.audio_path);
+            std::vector<diarization::RTTMSegment> empty;
+            if (config.output_path.empty()) {
+                diarization::write_rttm_stdout(empty, uri);
+            } else {
+                diarization::write_rttm(empty, uri, config.output_path);
+            }
+            return true;
+        }
+
+        fprintf(stderr, "Speaker count: max %d speakers, %d frames [%.0f ms]\n",
+                max_count, total_frames, t_speaker_count_ms);
+
+        // ================================================================
+        // Step 4: Extract embeddings (CoreML)
+        // ================================================================
+
+        t_stage_start = Clock::now();
+        std::vector<float> embeddings(
+            static_cast<size_t>(num_chunks) * NUM_LOCAL_SPEAKERS * EMBEDDING_DIM);
+
+        fprintf(stderr, "Embeddings: %d chunks... ", num_chunks);
+        fflush(stderr);
+        if (!extract_embeddings(
+                audio, n_samples,
+                binarized.data(), num_chunks, FRAMES_PER_CHUNK, NUM_LOCAL_SPEAKERS,
+                emb_ctx,
+                embeddings.data())) {
+            fprintf(stderr, "Error: embedding extraction failed\n");
+            return false;
+        }
+
+        t_stage_end = Clock::now();
+        t_embeddings_ms = std::chrono::duration<double, std::milli>(t_stage_end - t_stage_start).count();
+        fprintf(stderr, "done [%.0f ms]\n", t_embeddings_ms);
+
+        // ================================================================
+        // Step 5: Filter embeddings + PLDA + Clustering
+        // ================================================================
+
+        t_stage_start = Clock::now();
+        std::vector<float> filtered_emb;
+        std::vector<int> filt_chunk_idx, filt_speaker_idx;
+        diarization::filter_embeddings(
+            embeddings.data(), num_chunks, NUM_LOCAL_SPEAKERS, EMBEDDING_DIM,
+            binarized.data(), FRAMES_PER_CHUNK,
+            filtered_emb, filt_chunk_idx, filt_speaker_idx);
+
+        const int num_filtered = static_cast<int>(filt_chunk_idx.size());
+        fprintf(stderr, "Filter: %d embeddings ", num_filtered);
+        fflush(stderr);
+
+        std::vector<int> hard_clusters(
+            static_cast<size_t>(num_chunks) * NUM_LOCAL_SPEAKERS, 0);
+        int num_clusters = 1;
+
+        if (num_filtered < 2) {
+            t_stage_end = Clock::now();
+            t_filter_plda_ms = std::chrono::duration<double, std::milli>(t_stage_end - t_stage_start).count();
+            fprintf(stderr, "[%.0f ms]\n", t_filter_plda_ms);
+            fprintf(stderr, "Too few embeddings for clustering, using single cluster\n");
+        } else {
+            // L2-normalize filtered embeddings (for AHC)
+            std::vector<double> filtered_normed(
+                static_cast<size_t>(num_filtered) * EMBEDDING_DIM);
+            for (int i = 0; i < num_filtered; i++) {
+                const float* src = filtered_emb.data() + i * EMBEDDING_DIM;
+                double* dst = filtered_normed.data() + i * EMBEDDING_DIM;
+                double norm = 0.0;
+                for (int d = 0; d < EMBEDDING_DIM; d++) {
+                    dst[d] = static_cast<double>(src[d]);
+                    norm += dst[d] * dst[d];
+                }
+                norm = std::sqrt(norm);
+                if (norm > 0.0) {
+                    const double inv = 1.0 / norm;
+                    for (int d = 0; d < EMBEDDING_DIM; d++) {
+                        dst[d] *= inv;
+                    }
+                }
+            }
+
+            // PLDA transform (on original filtered embeddings, NOT normalized)
+            std::vector<double> filtered_double(
+                static_cast<size_t>(num_filtered) * EMBEDDING_DIM);
+            for (int i = 0; i < num_filtered * EMBEDDING_DIM; i++) {
+                filtered_double[i] = static_cast<double>(filtered_emb[i]);
+            }
+
+            std::vector<double> plda_features(
+                static_cast<size_t>(num_filtered) * PLDA_DIM);
+            diarization::plda_transform(
+                plda, filtered_double.data(), num_filtered, plda_features.data());
+
+            t_stage_end = Clock::now();
+            t_filter_plda_ms = std::chrono::duration<double, std::milli>(t_stage_end - t_stage_start).count();
+            fprintf(stderr, "[%.0f ms]\n", t_filter_plda_ms);
+
+            // AHC cluster (on normalized embeddings)
+            t_stage_start = Clock::now();
+            std::vector<int> ahc_clusters;
+            diarization::ahc_cluster(
+                filtered_normed.data(), num_filtered, EMBEDDING_DIM,
+                AHC_THRESHOLD, ahc_clusters);
+
+            int num_ahc_clusters = 0;
+            for (int i = 0; i < num_filtered; i++) {
+                if (ahc_clusters[i] + 1 > num_ahc_clusters)
+                    num_ahc_clusters = ahc_clusters[i] + 1;
+            }
+            fprintf(stderr, "PLDA: done ");
+            fflush(stderr);
+
+            filtered_normed.clear();
+            filtered_normed.shrink_to_fit();
+            filtered_double.clear();
+            filtered_double.shrink_to_fit();
+
+            fprintf(stderr, "AHC: %d clusters ", num_ahc_clusters);
+            fflush(stderr);
+
+            auto t_ahc_end = Clock::now();
+            double t_ahc_ms = std::chrono::duration<double, std::milli>(t_ahc_end - t_stage_start).count();
+            fprintf(stderr, "[%.0f ms]\n", t_ahc_ms);
+
+            // VBx clustering
+            t_stage_start = Clock::now();
+            diarization::VBxResult vbx_result;
+            if (!diarization::vbx_cluster(
+                    ahc_clusters.data(), num_filtered, num_ahc_clusters,
+                    plda_features.data(), PLDA_DIM,
+                    plda.plda_psi.data(), VBX_FA, VBX_FB, VBX_MAX_ITERS,
+                    vbx_result)) {
+                fprintf(stderr, "Error: VBx clustering failed\n");
+                result.segments.clear();
+                return false;
+            }
+
+            const int vbx_S = vbx_result.num_speakers;
+            const int vbx_T = vbx_result.num_frames;
+
+            std::vector<int> sig_speakers;
+            for (int s = 0; s < vbx_S; s++) {
+                if (vbx_result.pi[s] > 1e-7) {
+                    sig_speakers.push_back(s);
+                }
+            }
+            num_clusters = static_cast<int>(sig_speakers.size());
+            if (num_clusters == 0) num_clusters = 1;
+
+            t_stage_end = Clock::now();
+            double t_vbx_ms = std::chrono::duration<double, std::milli>(t_stage_end - t_stage_start).count();
+            t_clustering_ms = t_ahc_ms + t_vbx_ms;
+            fprintf(stderr, "VBx: %d speakers [%.0f ms]\n", num_clusters, t_vbx_ms);
+
+            // Compute centroids
+            std::vector<float> centroids(
+                static_cast<size_t>(num_clusters) * EMBEDDING_DIM, 0.0f);
+            std::vector<double> w_col_sum(num_clusters, 0.0);
+
+            for (int k = 0; k < num_clusters; k++) {
+                const int s = sig_speakers[k];
+                for (int t = 0; t < vbx_T; t++) {
+                    const double w = vbx_result.gamma[t * vbx_S + s];
+                    w_col_sum[k] += w;
+                    const float* emb = filtered_emb.data() + t * EMBEDDING_DIM;
+                    float* cent = centroids.data() + k * EMBEDDING_DIM;
+                    for (int d = 0; d < EMBEDDING_DIM; d++) {
+                        cent[d] += static_cast<float>(w * static_cast<double>(emb[d]));
+                    }
+                }
+            }
+            for (int k = 0; k < num_clusters; k++) {
+                if (w_col_sum[k] > 0.0) {
+                    float* cent = centroids.data() + k * EMBEDDING_DIM;
+                    const float inv = static_cast<float>(1.0 / w_col_sum[k]);
+                    for (int d = 0; d < EMBEDDING_DIM; d++) {
+                        cent[d] *= inv;
+                    }
+                }
+            }
+
+            // Soft clusters + constrained argmax
+            const int total_emb = num_chunks * NUM_LOCAL_SPEAKERS;
+            std::vector<float> soft_clusters(
+                static_cast<size_t>(total_emb) * num_clusters);
+
+            for (int e = 0; e < total_emb; e++) {
+                const float* emb = embeddings.data() + e * EMBEDDING_DIM;
+                for (int k = 0; k < num_clusters; k++) {
+                    const float* cent = centroids.data() + k * EMBEDDING_DIM;
+                    double dist = diarization::cosine_distance(emb, cent, EMBEDDING_DIM);
+                    soft_clusters[e * num_clusters + k] =
+                        static_cast<float>(2.0 - dist);
+                }
+            }
+
+            diarization::constrained_argmax(
+                soft_clusters.data(), num_chunks, NUM_LOCAL_SPEAKERS, num_clusters,
+                hard_clusters);
+        }
+
+        // Mark inactive speakers as -2
+        t_stage_start = Clock::now();
+        for (int c = 0; c < num_chunks; c++) {
+            const float* seg_chunk =
+                binarized.data() + c * FRAMES_PER_CHUNK * NUM_LOCAL_SPEAKERS;
+            for (int s = 0; s < NUM_LOCAL_SPEAKERS; s++) {
+                float sum = 0.0f;
+                for (int f = 0; f < FRAMES_PER_CHUNK; f++) {
+                    sum += seg_chunk[f * NUM_LOCAL_SPEAKERS + s];
+                }
+                if (sum == 0.0f) {
+                    hard_clusters[c * NUM_LOCAL_SPEAKERS + s] = -2;
+                }
+            }
+        }
+
+        // ================================================================
+        // Step 6: Reconstruct — build clustered segmentations
+        // ================================================================
+
+        std::vector<float> clustered_seg(
+            static_cast<size_t>(num_chunks) * FRAMES_PER_CHUNK * num_clusters);
+        {
+            const float nan_val = std::nanf("");
+            std::fill(clustered_seg.begin(), clustered_seg.end(), nan_val);
+        }
+
+        for (int c = 0; c < num_chunks; c++) {
+            const int* chunk_clusters = hard_clusters.data() + c * NUM_LOCAL_SPEAKERS;
+            const float* seg_chunk =
+                binarized.data() + c * FRAMES_PER_CHUNK * NUM_LOCAL_SPEAKERS;
+
+            for (int k = 0; k < num_clusters; k++) {
+                for (int s = 0; s < NUM_LOCAL_SPEAKERS; s++) {
+                    if (chunk_clusters[s] != k) continue;
+
+                    for (int f = 0; f < FRAMES_PER_CHUNK; f++) {
+                        const float val =
+                            seg_chunk[f * NUM_LOCAL_SPEAKERS + s];
+                        float& out =
+                            clustered_seg[
+                                (c * FRAMES_PER_CHUNK + f) * num_clusters + k];
+                        if (std::isnan(out)) {
+                            out = val;
+                        } else {
+                            out = std::max(out, val);
+                        }
+                    }
+                }
+            }
+        }
+
+        // ================================================================
+        // Step 7: to_diarization — aggregate + select top-count speakers
+        // ================================================================
+
+        std::vector<float> discrete_diarization;
+        diarization::to_diarization(
+            clustered_seg.data(), num_chunks, FRAMES_PER_CHUNK, num_clusters,
+            count.data(), total_frames,
+            chunk_window, frame_window,
+            discrete_diarization);
+
+        clustered_seg.clear();
+        clustered_seg.shrink_to_fit();
+
+        // ================================================================
+        // Step 8: Convert to RTTM segments
+        // ================================================================
+
+        const int out_frames =
+            static_cast<int>(discrete_diarization.size()) / num_clusters;
+
+        std::vector<diarization::RTTMSegment> rttm_segments;
+
+        for (int k = 0; k < num_clusters; k++) {
+            char speaker_label[16];
+            snprintf(speaker_label, sizeof(speaker_label), "SPEAKER_%02d", k);
+
+            bool in_segment = false;
+            int seg_start_frame = 0;
+
+            for (int f = 0; f <= out_frames; f++) {
+                bool active = false;
+                if (f < out_frames) {
+                    active = (discrete_diarization[f * num_clusters + k] == 1.0f);
+                }
+
+                if (active && !in_segment) {
+                    seg_start_frame = f;
+                    in_segment = true;
+                } else if (!active && in_segment) {
+                    const double start_time =
+                        chunk_window.start + seg_start_frame * FRAME_STEP + 0.5 * FRAME_DURATION;
+                    const double duration =
+                        (f - seg_start_frame) * FRAME_STEP;
+                    if (duration > 0.0) {
+                        rttm_segments.push_back(
+                            {start_time, duration, speaker_label});
+                    }
+                    in_segment = false;
+                }
+            }
+        }
+
+        std::sort(rttm_segments.begin(), rttm_segments.end(),
+                  [](const diarization::RTTMSegment& a,
+                     const diarization::RTTMSegment& b) {
+                      return a.start < b.start;
+                  });
+
+        // ================================================================
+        // Step 9: Write RTTM output
+        // ================================================================
+
+        std::string uri = config.audio_path.empty() ? "audio" : extract_uri(config.audio_path);
+
+        if (config.output_path.empty()) {
+            diarization::write_rttm_stdout(rttm_segments, uri);
+        } else {
+            diarization::write_rttm(rttm_segments, uri, config.output_path);
+        }
+
+        // Populate result struct
+        result.segments.clear();
+        result.segments.reserve(rttm_segments.size());
+        for (const auto& seg : rttm_segments) {
+            result.segments.push_back({seg.start, seg.duration, seg.speaker});
+        }
+
+        t_stage_end = Clock::now();
+        t_postprocess_ms = std::chrono::duration<double, std::milli>(t_stage_end - t_stage_start).count();
+        fprintf(stderr, "Assignment + reconstruction: done [%.0f ms]\n", t_postprocess_ms);
+
+        auto t_total_end = Clock::now();
+        double t_total_ms = std::chrono::duration<double, std::milli>(t_total_end - t_total_start).count();
+
+        fprintf(stderr, "\n=== Timing Summary (with_models) ===\n");
+        fprintf(stderr, "  Segmentation:    %6.0f ms  (%.1f%%)\n",
+                t_segmentation_ms, 100.0 * t_segmentation_ms / t_total_ms);
+        fprintf(stderr, "  Powerset:        %6.0f ms\n", t_powerset_ms);
+        fprintf(stderr, "  Speaker count:   %6.0f ms\n", t_speaker_count_ms);
+        fprintf(stderr, "  Embeddings:      %6.0f ms  (%.1f%%)\n",
+                t_embeddings_ms, 100.0 * t_embeddings_ms / t_total_ms);
+        fprintf(stderr, "  Filter+PLDA:     %6.0f ms\n", t_filter_plda_ms);
+        fprintf(stderr, "  AHC+VBx:         %6.0f ms\n", t_clustering_ms);
+        fprintf(stderr, "  Post-process:    %6.0f ms\n", t_postprocess_ms);
+        fprintf(stderr, "  ─────────────────────────\n");
+        fprintf(stderr, "  Total:           %6.0f ms\n", t_total_ms);
+
+        fprintf(stderr, "\nDiarization complete: %zu segments, %d speakers\n",
+                rttm_segments.size(), num_clusters);
+        return true;
+    }
+
+    return true;
+}
+#endif  // SEGMENTATION_USE_COREML && EMBEDDING_USE_COREML

@@ -47,7 +47,8 @@ struct StreamingState {
     int samples_trimmed = 0;
     int silence_frames_offset = 0;
     
-    // Model contexts (owned, freed in streaming_free)
+    // Model contexts (owned unless borrowed via streaming_init_with_models)
+    bool owns_models = true;
     struct segmentation_coreml_context* seg_coreml_ctx = nullptr;
     struct embedding_coreml_context* emb_coreml_ctx = nullptr;
     

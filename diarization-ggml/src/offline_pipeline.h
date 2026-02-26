@@ -33,3 +33,13 @@ OfflinePipelineResult offline_transcribe(
     const OfflinePipelineConfig& config,
     const float* audio,
     int n_samples);
+
+struct ModelCache;
+
+// Run offline transcription + diarization using pre-loaded models from a ModelCache.
+// The cache must remain valid for the duration of this call.
+OfflinePipelineResult offline_transcribe_with_cache(
+    const OfflinePipelineConfig& config,
+    ModelCache* cache,
+    const float* audio,
+    int n_samples);

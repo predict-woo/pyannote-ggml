@@ -267,3 +267,82 @@ describe('Resource cleanup', () => {
     await expect(model.transcribe(new Float32Array(16000))).rejects.toThrow();
   });
 });
+
+describe('Shared model cache', () => {
+  let model: Pipeline;
+  const audio = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
+
+  beforeAll(async () => {
+    model = await Pipeline.load(config);
+  });
+
+  afterAll(() => {
+    model.close();
+  });
+
+  it('transcribeOffline produces valid segments', async () => {
+    const result = await model.transcribeOffline(audio);
+    expect(result.segments).toBeDefined();
+    expect(result.segments.length).toBeGreaterThan(0);
+
+    for (const seg of result.segments) {
+      expect(typeof seg.speaker).toBe('string');
+      expect(typeof seg.start).toBe('number');
+      expect(typeof seg.duration).toBe('number');
+      expect(typeof seg.text).toBe('string');
+      expect(seg.start).toBeGreaterThanOrEqual(0);
+      expect(seg.duration).toBeGreaterThan(0);
+      expect(seg.speaker).toMatch(/^SPEAKER_\d+$/);
+      expect(seg.text.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('switching between offline and streaming on same instance', async () => {
+    const offlineFirst = await model.transcribeOffline(audio);
+    expect(offlineFirst.segments.length).toBeGreaterThan(0);
+
+    const streaming = await model.transcribe(audio);
+    expect(streaming.segments.length).toBeGreaterThan(0);
+
+    const offlineSecond = await model.transcribeOffline(audio);
+    expect(offlineSecond.segments.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Shared model cache', () => {
+  let model: Pipeline;
+  const audio = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
+
+  beforeAll(async () => {
+    model = await Pipeline.load(config);
+  });
+
+  afterAll(() => {
+    model.close();
+  });
+
+  it('transcribeOffline produces valid segments', async () => {
+    const result = await model.transcribeOffline(audio);
+    expect(result.segments).toBeDefined();
+    expect(result.segments.length).toBeGreaterThan(0);
+
+    for (const seg of result.segments) {
+      expect(typeof seg.speaker).toBe('string');
+      expect(typeof seg.start).toBe('number');
+      expect(typeof seg.duration).toBe('number');
+      expect(typeof seg.text).toBe('string');
+      expect(seg.speaker).toMatch(/^SPEAKER_\d+$/);
+    }
+  });
+
+  it('switches between offline and streaming on same instance', async () => {
+    const offlineResult1 = await model.transcribeOffline(audio);
+    expect(offlineResult1.segments.length).toBeGreaterThan(0);
+
+    const streamResult = await model.transcribe(audio);
+    expect(streamResult.segments.length).toBeGreaterThan(0);
+
+    const offlineResult2 = await model.transcribeOffline(audio);
+    expect(offlineResult2.segments.length).toBeGreaterThan(0);
+  });
+});

@@ -15,6 +15,8 @@ public:
     bool IsClosed() const { return closed_; }
     bool IsBusy() const { return busy_; }
     void SetBusy(bool busy) { busy_ = busy; }
+    void SetCache(ModelCache* cache) { cache_ = cache; loaded_ = true; }
+    ModelCache* GetCache() const { return cache_; }
 
     static Napi::FunctionReference constructor;
 
@@ -26,6 +28,8 @@ private:
     Napi::Value GetIsClosed(const Napi::CallbackInfo& info);
     Napi::Value SetLanguage(const Napi::CallbackInfo& info);
     Napi::Value SetDecodeOptions(const Napi::CallbackInfo& info);
+    Napi::Value LoadModels(const Napi::CallbackInfo& info);
+    Napi::Value GetIsLoaded(const Napi::CallbackInfo& info);
 
     std::string seg_model_path_;
     std::string emb_model_path_;
@@ -60,6 +64,8 @@ private:
     bool suppress_blank_ = true;
     bool suppress_nst_ = false;
 
+    ModelCache* cache_ = nullptr;
+    bool loaded_ = false;
     bool closed_ = false;
     bool busy_ = false;
 };

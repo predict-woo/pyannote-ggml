@@ -8,7 +8,8 @@ OfflineTranscribeWorker::OfflineTranscribeWorker(Napi::Env env,
     : Napi::AsyncWorker(env),
       model_(model),
       audio_(std::move(audio)),
-      deferred_(deferred)
+      deferred_(deferred),
+      cache_(model->GetCache())
 {
     // Build OfflinePipelineConfig from model's PipelineConfig.
     // String fields (seg_model_path, etc.) are std::string copies — safe.
@@ -24,8 +25,14 @@ OfflineTranscribeWorker::OfflineTranscribeWorker(Napi::Env env,
 }
 
 void OfflineTranscribeWorker::Execute() {
-    OfflinePipelineResult result = offline_transcribe(
-        config_, audio_.data(), static_cast<int>(audio_.size()));
+    OfflinePipelineResult result;
+    if (cache_) {
+        result = offline_transcribe_with_cache(
+            config_, cache_, audio_.data(), static_cast<int>(audio_.size()));
+    } else {
+        result = offline_transcribe(
+            config_, audio_.data(), static_cast<int>(audio_.size()));
+    }
 
     if (!result.valid) {
         SetError("Offline pipeline failed");

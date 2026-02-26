@@ -243,6 +243,43 @@ StreamingState* streaming_init(const StreamingConfig& config) {
     return state;
 }
 
+StreamingState* streaming_init_with_models(
+    const StreamingConfig& config,
+    struct segmentation_coreml_context* seg_ctx,
+    struct embedding_coreml_context* emb_ctx,
+    const diarization::PLDAModel& plda)
+{
+    StreamingState* state = new StreamingState();
+    state->config = config;
+    state->owns_models = false;
+
+    // Use borrowed model handles (not freed in streaming_free)
+    state->seg_coreml_ctx = seg_ctx;
+    state->emb_coreml_ctx = emb_ctx;
+    state->plda = plda;  // copy the PLDA model
+
+    state->chunks_processed = 0;
+    state->last_recluster_chunk = 0;
+    state->audio_time_processed = 0.0;
+    state->finalized = false;
+    state->num_speakers = 0;
+    state->num_provisional_speakers = 0;
+    state->samples_trimmed = 0;
+    state->silence_frames_offset = 0;
+
+    if (config.zero_latency) {
+        state->audio_buffer.resize(CHUNK_SAMPLES, 0.0f);
+        if (!process_one_chunk(state, CHUNK_SAMPLES)) {
+            fprintf(stderr, "Error: failed to process silence chunk in zero_latency mode\n");
+            delete state;
+            return nullptr;
+        }
+        state->silence_frames_offset = FRAMES_PER_CHUNK;
+    }
+
+    return state;
+}
+
 std::vector<VADChunk> streaming_push(
     StreamingState* state,
     const float* samples,
@@ -664,14 +701,14 @@ void streaming_free(StreamingState* state) {
     if (!state) return;
     
 #ifdef SEGMENTATION_USE_COREML
-    if (state->seg_coreml_ctx) {
+    if (state->owns_models && state->seg_coreml_ctx) {
         segmentation_coreml_free(state->seg_coreml_ctx);
         state->seg_coreml_ctx = nullptr;
     }
 #endif
 
 #ifdef EMBEDDING_USE_COREML
-    if (state->emb_coreml_ctx) {
+    if (state->owns_models && state->emb_coreml_ctx) {
         embedding_coreml_free(state->emb_coreml_ctx);
         state->emb_coreml_ctx = nullptr;
     }

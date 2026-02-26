@@ -68,6 +68,8 @@ PipelineSession::PipelineSession(const Napi::CallbackInfo& info)
         return;
     }
 
+    cache_ = model->GetCache();
+
     PipelineConfig srcConfig = model->BuildConfig();
 
     seg_model_path_ = srcConfig.diarization.seg_model_path;
@@ -139,7 +141,11 @@ PipelineSession::PipelineSession(const Napi::CallbackInfo& info)
     config.transcriber.suppress_blank = suppress_blank_;
     config.transcriber.suppress_nst = suppress_nst_;
 
-    state_ = pipeline_init(config, pipeline_cb, audio_cb, this);
+    if (cache_) {
+        state_ = pipeline_init_with_cache(config, cache_, pipeline_cb, audio_cb, this);
+    } else {
+        state_ = pipeline_init(config, pipeline_cb, audio_cb, this);
+    }
     if (!state_) {
         tsfn_.Release();
         tsfn_released_ = true;

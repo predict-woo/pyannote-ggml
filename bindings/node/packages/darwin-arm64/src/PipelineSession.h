@@ -71,6 +71,7 @@ private:
     bool suppress_nst_ = false;
 
     PipelineState* state_ = nullptr;
+    ModelCache* cache_ = nullptr;  // borrowed from PipelineModel, NOT freed here
     Napi::ThreadSafeFunction tsfn_;
     Napi::ThreadSafeFunction audio_tsfn_;
     bool closed_ = false;

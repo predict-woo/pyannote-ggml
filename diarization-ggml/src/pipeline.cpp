@@ -5,6 +5,7 @@
 #include "streaming.h"
 #include "aligner.h"
 #include "whisper.h"
+#include "model_cache.h"
 
 #include <algorithm>
 #include <cmath>
@@ -40,6 +41,7 @@ struct PipelineState {
     std::deque<PendingSubmission> submission_queue;
 
     whisper_vad_context* vad_ctx;
+    bool owns_vad = true;
 };
 
 static void try_submit_next(PipelineState* state) {
@@ -151,6 +153,72 @@ PipelineState* pipeline_init(const PipelineConfig& config, pipeline_callback cb,
         streaming_free(state->streaming_state);
         silence_filter_free(state->silence_filter);
         if (state->vad_ctx) whisper_vad_free(state->vad_ctx);
+        delete state;
+        return nullptr;
+    }
+
+    return state;
+}
+
+PipelineState* pipeline_init_with_cache(
+    const PipelineConfig& config,
+    ModelCache* cache,
+    pipeline_callback cb,
+    pipeline_audio_callback audio_cb,
+    void* user_data)
+{
+    if (!cache) {
+        fprintf(stderr, "ERROR: pipeline_init_with_cache called with null cache\n");
+        return nullptr;
+    }
+
+    auto* state = new PipelineState();
+    state->callback = cb;
+    state->audio_callback = audio_cb;
+    state->user_data = user_data;
+    state->buffer_start_time = 0.0;
+    state->whisper_in_flight = false;
+    state->buffer_has_speech = false;
+
+    // Borrow VAD context from cache
+    state->vad_ctx = cache->vad_ctx;
+    state->owns_vad = false;
+
+    state->silence_filter = silence_filter_init(state->vad_ctx, 0.5f);
+    if (!state->silence_filter) {
+        fprintf(stderr, "ERROR: failed to init silence filter\n");
+        delete state;
+        return nullptr;
+    }
+
+    // Use borrowed diarization models from cache
+    StreamingConfig diar_config = config.diarization;
+    diar_config.zero_latency = true;
+    state->streaming_state = streaming_init_with_models(
+        diar_config, cache->seg_coreml_ctx, cache->emb_coreml_ctx, cache->plda);
+    if (!state->streaming_state) {
+        fprintf(stderr, "ERROR: failed to init streaming diarization (with cache)\n");
+        silence_filter_free(state->silence_filter);
+        delete state;
+        return nullptr;
+    }
+
+    state->segment_detector = segment_detector_init();
+    if (!state->segment_detector) {
+        fprintf(stderr, "ERROR: failed to init segment detector\n");
+        streaming_free(state->streaming_state);
+        silence_filter_free(state->silence_filter);
+        delete state;
+        return nullptr;
+    }
+
+    // Use borrowed whisper context from cache
+    state->transcriber = transcriber_init_with_context(config.transcriber, cache->whisper_ctx);
+    if (!state->transcriber) {
+        fprintf(stderr, "ERROR: failed to init transcriber (with cache)\n");
+        segment_detector_free(state->segment_detector);
+        streaming_free(state->streaming_state);
+        silence_filter_free(state->silence_filter);
         delete state;
         return nullptr;
     }
@@ -274,7 +342,7 @@ void pipeline_free(PipelineState* state) {
     streaming_free(state->streaming_state);
     silence_filter_free(state->silence_filter);
 
-    if (state->vad_ctx) {
+    if (state->owns_vad && state->vad_ctx) {
         whisper_vad_free(state->vad_ctx);
     }
 

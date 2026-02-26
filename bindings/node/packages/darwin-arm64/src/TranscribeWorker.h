@@ -30,4 +30,5 @@ private:
     std::vector<float> audio_;
     Napi::Promise::Deferred deferred_;
     TranscribeCallbackData cb_data_;
+    ModelCache* cache_ = nullptr;
 };

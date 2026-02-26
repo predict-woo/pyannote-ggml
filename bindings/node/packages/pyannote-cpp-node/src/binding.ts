@@ -15,6 +15,8 @@ export interface NativePipelineModel {
   ): NativePipelineSession;
   close(): void;
   isClosed: boolean;
+  loadModels(): Promise<void>;
+  isLoaded: boolean;
 }
 
 export interface NativePipelineSession {

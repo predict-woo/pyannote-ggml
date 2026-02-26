@@ -125,6 +125,7 @@ add_library(pipeline-lib STATIC
     src/segment_detector.cpp
     src/transcriber.cpp
     src/aligner.cpp
+    src/model_cache.cpp
 )
 
 target_include_directories(pipeline-lib PUBLIC
@@ -145,6 +146,7 @@ add_executable(transcribe
     src/segment_detector.cpp
     src/transcriber.cpp
     src/aligner.cpp
+    src/model_cache.cpp
 )
 target_link_libraries(transcribe PRIVATE transcription-lib)
 target_include_directories(transcribe PRIVATE
@@ -183,6 +185,7 @@ add_executable(test_pipeline
     src/segment_detector.cpp
     src/transcriber.cpp
     src/aligner.cpp
+    src/model_cache.cpp
 )
 target_link_libraries(test_pipeline PRIVATE transcription-lib)
 target_include_directories(test_pipeline PRIVATE

@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "plda.h"
 
 struct DiarizationConfig {
     std::string seg_model_path;
@@ -25,6 +26,19 @@ struct DiarizationResult {
 bool diarize(const DiarizationConfig& config, DiarizationResult& result);
 bool diarize_from_samples(const DiarizationConfig& config, const float* audio, int n_samples, DiarizationResult& result);
 
+struct segmentation_coreml_context;
+
+// Diarize from audio samples using pre-loaded models (borrowed, not freed).
+// Only available when both SEGMENTATION_USE_COREML and EMBEDDING_USE_COREML are defined.
+#if defined(SEGMENTATION_USE_COREML) && defined(EMBEDDING_USE_COREML)
+bool diarize_from_samples_with_models(
+    const DiarizationConfig& config,
+    const float* audio, int n_samples,
+    struct segmentation_coreml_context* seg_ctx,
+    struct embedding_coreml_context* emb_ctx,
+    const diarization::PLDAModel& plda,
+    DiarizationResult& result);
+#endif
 struct embedding_coreml_context;
 namespace embedding {
     struct embedding_model;

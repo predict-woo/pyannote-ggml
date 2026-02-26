@@ -27,4 +27,5 @@ private:
     std::vector<float> audio_;
     Napi::Promise::Deferred deferred_;
     OfflineTranscribeCallbackData cb_data_;
+    ModelCache* cache_ = nullptr;
 };

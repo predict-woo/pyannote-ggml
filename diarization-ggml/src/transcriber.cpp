@@ -27,6 +27,7 @@ struct Transcriber {
     bool has_result = false;
 
     bool shutdown = false;
+    bool owns_ctx = true;
     TranscriberConfig config;
     DecodeOptions decode_opts;
 };
@@ -175,6 +176,40 @@ Transcriber* transcriber_init(const TranscriberConfig& config) {
     return t;
 }
 
+Transcriber* transcriber_init_with_context(const TranscriberConfig& config, whisper_context* ctx) {
+    if (!ctx) {
+        fprintf(stderr, "ERROR: transcriber_init_with_context called with null context\n");
+        return nullptr;
+    }
+
+    if (config.no_prints) {
+        whisper_log_set([](enum ggml_log_level, const char*, void*){}, nullptr);
+    }
+
+    auto* t = new Transcriber();
+    t->ctx = ctx;
+    t->owns_ctx = false;
+    t->config = config;
+    t->decode_opts.language = config.language ? config.language : "";
+    t->decode_opts.translate = config.translate;
+    t->decode_opts.detect_language = config.detect_language;
+    t->decode_opts.n_threads = config.n_threads;
+    t->decode_opts.temperature = config.temperature;
+    t->decode_opts.temperature_inc = config.temperature_inc;
+    t->decode_opts.no_fallback = config.no_fallback;
+    t->decode_opts.beam_size = config.beam_size;
+    t->decode_opts.best_of = config.best_of;
+    t->decode_opts.entropy_thold = config.entropy_thold;
+    t->decode_opts.logprob_thold = config.logprob_thold;
+    t->decode_opts.no_speech_thold = config.no_speech_thold;
+    t->decode_opts.prompt = config.prompt ? config.prompt : "";
+    t->decode_opts.no_context = config.no_context;
+    t->decode_opts.suppress_blank = config.suppress_blank;
+    t->decode_opts.suppress_nst = config.suppress_nst;
+    t->worker = std::thread(worker_loop, t);
+    return t;
+}
+
 void transcriber_submit(Transcriber* t, const float* audio, int n_samples, double buffer_start_time) {
     std::lock_guard<std::mutex> lock(t->mtx);
     t->pending_audio.assign(audio, audio + n_samples);
@@ -219,7 +254,7 @@ void transcriber_free(Transcriber* t) {
         t->worker.join();
     }
 
-    if (t->ctx) {
+    if (t->ctx && t->owns_ctx) {
         whisper_free(t->ctx);
     }
 

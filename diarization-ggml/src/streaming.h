@@ -18,6 +18,15 @@ struct VADChunk {
 // Initialize streaming state. Returns nullptr on failure.
 StreamingState* streaming_init(const StreamingConfig& config);
 
+// Initialize streaming state with pre-loaded models (borrowed, not freed on streaming_free).
+// seg_ctx and emb_ctx must remain valid until streaming_free() is called.
+// The PLDA model is copied into StreamingState.
+StreamingState* streaming_init_with_models(
+    const StreamingConfig& config,
+    struct segmentation_coreml_context* seg_ctx,
+    struct embedding_coreml_context* emb_ctx,
+    const diarization::PLDAModel& plda);
+
 // Push audio samples. Returns VAD chunks for each newly processed segmentation chunk.
 // samples: float array of audio samples (16kHz mono)
 // num_samples: number of samples (typically 16000 for 1s of audio)
