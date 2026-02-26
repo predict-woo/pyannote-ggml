@@ -145,3 +145,34 @@ void model_cache_free(ModelCache* cache) {
 
     delete cache;
 }
+
+bool model_cache_reload_whisper(ModelCache* cache, const TranscriberConfig& config) {
+    if (!cache) return false;
+
+    // Free existing whisper context
+    if (cache->whisper_ctx) {
+        whisper_free(cache->whisper_ctx);
+        cache->whisper_ctx = nullptr;
+    }
+
+    // Build new context params from config (same pattern as model_cache_load step 4)
+    auto cparams = whisper_context_default_params();
+    cparams.use_gpu    = config.use_gpu;
+    cparams.flash_attn = config.flash_attn;
+    cparams.gpu_device = config.gpu_device;
+    cparams.use_coreml = config.use_coreml;
+
+    if (config.no_prints) {
+        whisper_log_set([](enum ggml_log_level, const char*, void*){}, nullptr);
+    }
+
+    cache->whisper_ctx = whisper_init_from_file_with_params(
+        config.whisper_model_path, cparams);
+    if (!cache->whisper_ctx) {
+        fprintf(stderr, "model_cache_reload_whisper: failed to load Whisper model '%s'\n",
+                config.whisper_model_path);
+        return false;
+    }
+
+    return true;
+}

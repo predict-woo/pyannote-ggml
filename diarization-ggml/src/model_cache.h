@@ -45,3 +45,8 @@ ModelCache* model_cache_load(const ModelCacheConfig& config);
 
 // Free all models.
 void model_cache_free(ModelCache* cache);
+
+// Reload whisper context with updated config (e.g., different use_coreml setting).
+// Frees existing whisper_ctx and loads a new one. Returns true on success.
+// On failure, whisper_ctx is set to nullptr.
+bool model_cache_reload_whisper(ModelCache* cache, const TranscriberConfig& config);

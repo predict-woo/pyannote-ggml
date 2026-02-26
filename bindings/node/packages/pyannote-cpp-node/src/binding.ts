@@ -17,6 +17,7 @@ export interface NativePipelineModel {
   isClosed: boolean;
   loadModels(): Promise<void>;
   isLoaded: boolean;
+  switchWhisperMode(useCoreml: boolean): Promise<void>;
 }
 
 export interface NativePipelineSession {

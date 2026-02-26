@@ -26,6 +26,7 @@ The API supports three modes: **offline** batch processing (`transcribeOffline`)
 - **Streaming mode**: incremental push/finalize with real-time `segments` events and `audio` chunk streaming
 - Deterministic output for the same audio/models/config
 - CoreML-accelerated inference on macOS
+- **Shared model cache**: all models loaded once during `Pipeline.load()`, reused across offline/streaming/session modes
 - TypeScript-first API with complete type definitions
 
 ## Requirements
@@ -95,6 +96,7 @@ class Pipeline {
   setLanguage(language: string): void;
   setDecodeOptions(options: DecodeOptions): void;
   createSession(): PipelineSession;
+  async setUseCoreml(useCoreml: boolean): Promise<void>;
   close(): void;
   get isClosed(): boolean;
 }
@@ -102,7 +104,7 @@ class Pipeline {
 
 #### `static async load(config: ModelConfig): Promise<Pipeline>`
 
-Validates model paths and initializes native pipeline resources.
+Validates model paths and loads all models (Whisper, CoreML segmentation/embedding, PLDA, and optionally VAD) into a shared cache on a background thread. Models are loaded once and reused across all subsequent `transcribe()`, `transcribeOffline()`, and `createSession()` calls — no redundant loading occurs when switching between modes. Models are freed only when `close()` is called.
 
 #### `async transcribeOffline(audio: Float32Array): Promise<TranscriptionResult>`
 
@@ -120,6 +122,29 @@ Updates the Whisper decode language for subsequent `transcribe()` calls. This is
 
 Updates one or more Whisper decode options for subsequent `transcribe()` calls. Only the fields you pass are changed; others retain their current values. See `DecodeOptions` for available fields.
 
+
+#### `async setUseCoreml(useCoreml: boolean): Promise<void>`
+
+Switches the Whisper inference backend between GPU-only (`false`) and GPU+CoreML (`true`) at runtime. The method reloads the Whisper context on a background thread with the new `use_coreml` setting. The promise resolves when the new context is ready.
+
+- If the requested mode matches the current mode, returns immediately (no reload).
+- Throws if the pipeline is closed, busy, or models are not loaded.
+- After switching, all subsequent `transcribe()`, `transcribeOffline()`, and streaming session calls use the new backend.
+
+```typescript
+// Start with GPU-only Whisper
+const pipeline = await Pipeline.load({
+  ...modelPaths,
+  useCoreml: false,
+});
+
+// Switch to CoreML-accelerated Whisper at runtime
+await pipeline.setUseCoreml(true);
+const result = await pipeline.transcribeOffline(audio);
+
+// Switch back to GPU-only
+await pipeline.setUseCoreml(false);
+```
 #### `createSession(): PipelineSession`
 
 Creates an independent streaming session for incremental processing.

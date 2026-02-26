@@ -3,6 +3,7 @@
 #include "TranscribeWorker.h"
 #include "OfflineTranscribeWorker.h"
 #include "LoadModelsWorker.h"
+#include "SwitchWhisperModeWorker.h"
 #include "model_cache.h"
 
 Napi::FunctionReference PipelineModel::constructor;
@@ -16,6 +17,7 @@ Napi::Object PipelineModel::Init(Napi::Env env, Napi::Object exports) {
         InstanceMethod<&PipelineModel::SetDecodeOptions>("setDecodeOptions"),
         InstanceMethod<&PipelineModel::Close>("close"),
         InstanceMethod<&PipelineModel::LoadModels>("loadModels"),
+        InstanceMethod<&PipelineModel::SwitchWhisperMode>("switchWhisperMode"),
         InstanceAccessor<&PipelineModel::GetIsClosed>("isClosed"),
         InstanceAccessor<&PipelineModel::GetIsLoaded>("isLoaded"),
     });
@@ -396,4 +398,47 @@ Napi::Value PipelineModel::LoadModels(const Napi::CallbackInfo& info) {
 
 Napi::Value PipelineModel::GetIsLoaded(const Napi::CallbackInfo& info) {
     return Napi::Boolean::New(info.Env(), loaded_);
+}
+
+Napi::Value PipelineModel::SwitchWhisperMode(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+
+    if (closed_) {
+        Napi::Error::New(env, "Model is closed").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    if (busy_) {
+        Napi::Error::New(env, "Model is busy with another operation")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    if (!loaded_) {
+        Napi::Error::New(env, "Models not loaded. Call loadModels() first.")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    if (info.Length() < 1 || !info[0].IsBoolean()) {
+        Napi::TypeError::New(env, "Expected boolean argument")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    bool use_coreml = info[0].As<Napi::Boolean>().Value();
+
+    // If already in the requested mode, return immediately-resolving promise
+    if (use_coreml_ == use_coreml) {
+        auto deferred = Napi::Promise::Deferred::New(env);
+        deferred.Resolve(env.Undefined());
+        return deferred.Promise();
+    }
+
+    busy_ = true;
+    auto deferred = Napi::Promise::Deferred::New(env);
+    auto* worker = new SwitchWhisperModeWorker(env, this, use_coreml, deferred);
+    worker->Queue();
+
+    return deferred.Promise();
 }

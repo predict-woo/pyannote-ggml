@@ -63,6 +63,11 @@ export class Pipeline {
     return session;
   }
 
+  async setUseCoreml(useCoreml: boolean): Promise<void> {
+    if (this.native.isClosed) throw new Error('Pipeline is closed');
+    return this.native.switchWhisperMode(useCoreml);
+  }
+
   close(): void { this.native.close(); }
   get isClosed(): boolean { return this.native.isClosed; }
 }

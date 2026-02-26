@@ -346,3 +346,73 @@ describe('Shared model cache', () => {
     expect(offlineResult2.segments.length).toBeGreaterThan(0);
   });
 });
+
+describe('Whisper CoreML mode switching', () => {
+  // Use turbo model which has a CoreML encoder (.mlmodelc) available
+  const coremlConfig = {
+    ...config,
+    whisperModelPath: resolve(PROJECT_ROOT, 'whisper.cpp/models/ggml-large-v3-turbo-q5_0.bin'),
+  };
+  let model: Pipeline;
+  const audio = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
+
+  beforeAll(async () => {
+    model = await Pipeline.load(coremlConfig);
+  });
+
+  afterAll(() => {
+    model.close();
+  });
+
+  it('no-op when already in requested mode', async () => {
+    // Pipeline starts with useCoreml=false (default). Calling setUseCoreml(false) is a no-op.
+    await expect(model.setUseCoreml(false)).resolves.toBeUndefined();
+  });
+
+  it('switches to CoreML mode and transcribes correctly', async () => {
+    // Triggers a real whisper context reload (false → true).
+    // Turbo model has ggml-large-v3-turbo-q5_0-encoder.mlmodelc next to it.
+    await model.setUseCoreml(true);
+
+    const result = await model.transcribeOffline(audio);
+    expect(result.segments.length).toBeGreaterThan(0);
+    for (const seg of result.segments) {
+      expect(seg.speaker).toMatch(/^SPEAKER_\d+$/);
+      expect(typeof seg.start).toBe('number');
+      expect(seg.duration).toBeGreaterThan(0);
+      expect(seg.text.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('switches back to GPU-only mode and transcribes correctly', async () => {
+    // Switch back: true → false (another real reload)
+    await model.setUseCoreml(false);
+
+    const result = await model.transcribeOffline(audio);
+    expect(result.segments.length).toBeGreaterThan(0);
+    for (const seg of result.segments) {
+      expect(seg.speaker).toMatch(/^SPEAKER_\d+$/);
+      expect(seg.text.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('streaming transcription works after mode switch', async () => {
+    await model.setUseCoreml(true);
+
+    const result = await model.transcribe(audio);
+    expect(result.segments.length).toBeGreaterThan(0);
+    for (const seg of result.segments) {
+      expect(seg.speaker).toMatch(/^SPEAKER_\d+$/);
+      expect(seg.text.length).toBeGreaterThan(0);
+    }
+
+    // Switch back for subsequent tests
+    await model.setUseCoreml(false);
+  });
+
+  it('setUseCoreml on closed pipeline throws', async () => {
+    const m = await Pipeline.load(coremlConfig);
+    m.close();
+    await expect(m.setUseCoreml(false)).rejects.toThrow();
+  });
+});

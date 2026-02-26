@@ -17,6 +17,7 @@ public:
     void SetBusy(bool busy) { busy_ = busy; }
     void SetCache(ModelCache* cache) { cache_ = cache; loaded_ = true; }
     ModelCache* GetCache() const { return cache_; }
+    void SetUseCoreml(bool v) { use_coreml_ = v; }
 
     static Napi::FunctionReference constructor;
 
@@ -30,6 +31,7 @@ private:
     Napi::Value SetDecodeOptions(const Napi::CallbackInfo& info);
     Napi::Value LoadModels(const Napi::CallbackInfo& info);
     Napi::Value GetIsLoaded(const Napi::CallbackInfo& info);
+    Napi::Value SwitchWhisperMode(const Napi::CallbackInfo& info);
 
     std::string seg_model_path_;
     std::string emb_model_path_;
