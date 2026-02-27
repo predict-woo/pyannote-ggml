@@ -97,6 +97,27 @@ OfflinePipelineResult offline_transcribe(
         params.progress_callback_user_data = &progress_bridge;
     }
 
+    // New segment callback — stream each Whisper segment as it's produced
+    struct SegmentBridge {
+        std::function<void(double, double, const std::string&)> cb;
+    };
+    SegmentBridge segment_bridge{config.new_segment_callback};
+
+    if (segment_bridge.cb) {
+        params.new_segment_callback = [](struct whisper_context* wctx, struct whisper_state*, int n_new, void* user_data) {
+            auto* bridge = static_cast<SegmentBridge*>(user_data);
+            if (!bridge->cb) return;
+            int n_segments = whisper_full_n_segments(wctx);
+            for (int i = n_segments - n_new; i < n_segments; i++) {
+                int64_t t0 = whisper_full_get_segment_t0(wctx, i);
+                int64_t t1 = whisper_full_get_segment_t1(wctx, i);
+                const char* text = whisper_full_get_segment_text(wctx, i);
+                bridge->cb(t0 * 0.01, t1 * 0.01, text ? text : "");
+            }
+        };
+        params.new_segment_callback_user_data = &segment_bridge;
+    }
+
     const double audio_duration = static_cast<double>(n_samples) / 16000.0;
     fprintf(stderr, "Offline pipeline: running Whisper on %.1fs of audio...\n",
             audio_duration);
@@ -251,6 +272,27 @@ OfflinePipelineResult offline_transcribe_with_cache(
             if (bridge->cb) bridge->cb(0, progress);
         };
         params.progress_callback_user_data = &progress_bridge;
+    }
+
+    // New segment callback — stream each Whisper segment as it's produced
+    struct SegmentBridge {
+        std::function<void(double, double, const std::string&)> cb;
+    };
+    SegmentBridge segment_bridge{config.new_segment_callback};
+
+    if (segment_bridge.cb) {
+        params.new_segment_callback = [](struct whisper_context* wctx, struct whisper_state*, int n_new, void* user_data) {
+            auto* bridge = static_cast<SegmentBridge*>(user_data);
+            if (!bridge->cb) return;
+            int n_segments = whisper_full_n_segments(wctx);
+            for (int i = n_segments - n_new; i < n_segments; i++) {
+                int64_t t0 = whisper_full_get_segment_t0(wctx, i);
+                int64_t t1 = whisper_full_get_segment_t1(wctx, i);
+                const char* text = whisper_full_get_segment_text(wctx, i);
+                bridge->cb(t0 * 0.01, t1 * 0.01, text ? text : "");
+            }
+        };
+        params.new_segment_callback_user_data = &segment_bridge;
     }
 
     const double audio_duration = static_cast<double>(n_samples) / 16000.0;

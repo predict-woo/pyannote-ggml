@@ -1,5 +1,6 @@
 #pragma once
 #include <napi.h>
+#include <string>
 #include <vector>
 #include "offline_pipeline.h"
 #include "aligner.h"
@@ -9,6 +10,12 @@ class PipelineModel;
 struct ProgressData {
     int phase;
     int progress;
+};
+
+struct SegmentData {
+    double start;
+    double end;
+    std::string text;
 };
 
 struct OfflineTranscribeCallbackData {
@@ -21,7 +28,8 @@ public:
                             PipelineModel* model,
                             std::vector<float>&& audio,
                             Napi::Promise::Deferred deferred,
-                            Napi::Function progress_callback);
+                            Napi::Function progress_callback,
+                            Napi::Function segment_callback);
 
     void Execute(const ExecutionProgress& progress) override;
     void OnOK() override;
@@ -36,4 +44,6 @@ private:
     OfflineTranscribeCallbackData cb_data_;
     ModelCache* cache_ = nullptr;
     Napi::FunctionReference progress_callback_;
+    Napi::ThreadSafeFunction segment_tsfn_;
+    bool has_segment_tsfn_ = false;
 };

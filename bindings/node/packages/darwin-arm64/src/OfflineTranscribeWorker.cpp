@@ -5,7 +5,8 @@ OfflineTranscribeWorker::OfflineTranscribeWorker(Napi::Env env,
                                                    PipelineModel* model,
                                                    std::vector<float>&& audio,
                                                    Napi::Promise::Deferred deferred,
-                                                   Napi::Function progress_callback)
+                                                   Napi::Function progress_callback,
+                                                   Napi::Function segment_callback)
     : Napi::AsyncProgressQueueWorker<ProgressData>(env),
       model_(model),
       audio_(std::move(audio)),
@@ -28,6 +29,18 @@ OfflineTranscribeWorker::OfflineTranscribeWorker(Napi::Env env,
     if (!progress_callback.IsEmpty() && progress_callback.IsFunction()) {
         progress_callback_ = Napi::Persistent(progress_callback);
     }
+
+    // Create ThreadSafeFunction for segment callback (if provided)
+    if (!segment_callback.IsEmpty() && segment_callback.IsFunction()) {
+        segment_tsfn_ = Napi::ThreadSafeFunction::New(
+            env,
+            segment_callback,
+            "SegmentCallback",
+            0,   // max queue size (0 = unlimited)
+            1    // initial thread count
+        );
+        has_segment_tsfn_ = true;
+    }
 }
 
 void OfflineTranscribeWorker::Execute(const ExecutionProgress& progress) {
@@ -36,6 +49,21 @@ void OfflineTranscribeWorker::Execute(const ExecutionProgress& progress) {
         config_.progress_callback = [&progress](int phase, int prog) {
             ProgressData data{phase, prog};
             progress.Send(&data, 1);
+        };
+    }
+
+    // Wire new segment callback to TSFN (non-blocking call to main thread)
+    if (has_segment_tsfn_) {
+        config_.new_segment_callback = [this](double start, double end, const std::string& text) {
+            auto* data = new SegmentData{start, end, text};
+            segment_tsfn_.NonBlockingCall(data, [](Napi::Env env, Napi::Function jsCallback, SegmentData* seg) {
+                jsCallback.Call({
+                    Napi::Number::New(env, seg->start),
+                    Napi::Number::New(env, seg->end),
+                    Napi::String::New(env, seg->text)
+                });
+                delete seg;
+            });
         };
     }
 
@@ -72,6 +100,12 @@ void OfflineTranscribeWorker::OnProgress(const ProgressData* data, size_t count)
 void OfflineTranscribeWorker::OnOK() {
     Napi::Env env = Env();
 
+    // Release segment TSFN — no more calls will be made
+    if (has_segment_tsfn_) {
+        segment_tsfn_.Release();
+        has_segment_tsfn_ = false;
+    }
+
     const auto& segments = cb_data_.segments;
     Napi::Array jsSegments = Napi::Array::New(env, segments.size());
 
@@ -94,6 +128,12 @@ void OfflineTranscribeWorker::OnOK() {
 }
 
 void OfflineTranscribeWorker::OnError(const Napi::Error& error) {
+    // Release segment TSFN to prevent leaks
+    if (has_segment_tsfn_) {
+        segment_tsfn_.Release();
+        has_segment_tsfn_ = false;
+    }
+
     model_->SetBusy(false);
     deferred_.Reject(error.Value());
 }

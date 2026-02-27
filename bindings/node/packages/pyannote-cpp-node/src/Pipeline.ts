@@ -38,11 +38,12 @@ export class Pipeline {
   async transcribeOffline(
     audio: Float32Array,
     onProgress?: (phase: number, progress: number) => void,
+    onSegment?: (start: number, end: number, text: string) => void,
   ): Promise<TranscriptionResult> {
     if (this.native.isClosed) throw new Error('Pipeline is closed');
     if (!(audio instanceof Float32Array)) throw new TypeError('Expected Float32Array');
     if (audio.length === 0) throw new Error('Audio must not be empty');
-    return this.native.transcribeOffline(audio, onProgress);
+    return this.native.transcribeOffline(audio, onProgress, onSegment);
   }
 
   setLanguage(language: string): void {

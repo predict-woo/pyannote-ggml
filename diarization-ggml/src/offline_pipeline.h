@@ -20,6 +20,10 @@ struct OfflinePipelineConfig {
     // Optional — null check before calling.
     std::function<void(int phase, int progress)> progress_callback;
 
+    // New segment callback: (start_seconds, end_seconds, text)
+    // Called for each new Whisper segment as it's produced. Optional.
+    std::function<void(double start, double end, const std::string& text)> new_segment_callback;
+
     // Whisper config
     TranscriberConfig transcriber;
 };
