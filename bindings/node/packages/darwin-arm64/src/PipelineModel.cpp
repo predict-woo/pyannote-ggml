@@ -357,9 +357,15 @@ Napi::Value PipelineModel::TranscribeOffline(const Napi::CallbackInfo& info) {
 
     std::vector<float> audio(float32Arr.Data(), float32Arr.Data() + length);
 
+    // Optional second argument: progress callback function
+    Napi::Function progress_callback;
+    if (info.Length() >= 2 && info[1].IsFunction()) {
+        progress_callback = info[1].As<Napi::Function>();
+    }
+
     busy_ = true;
     auto deferred = Napi::Promise::Deferred::New(env);
-    auto* worker = new OfflineTranscribeWorker(env, this, std::move(audio), deferred);
+    auto* worker = new OfflineTranscribeWorker(env, this, std::move(audio), deferred, progress_callback);
     worker->Queue();
 
     return deferred.Promise();

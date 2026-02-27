@@ -196,4 +196,24 @@ set_target_properties(test_pipeline PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+add_executable(test_offline_progress
+    tests/test_offline_progress.cpp
+    src/offline_pipeline.cpp
+    src/pipeline.cpp
+    src/silence_filter.cpp
+    src/audio_buffer.cpp
+    src/segment_detector.cpp
+    src/transcriber.cpp
+    src/aligner.cpp
+    src/model_cache.cpp
+)
+target_link_libraries(test_offline_progress PRIVATE transcription-lib)
+target_include_directories(test_offline_progress PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+set_target_properties(test_offline_progress PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
 message(STATUS "diarization-ggml project configured successfully")

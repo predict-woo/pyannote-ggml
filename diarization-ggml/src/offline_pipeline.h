@@ -4,6 +4,7 @@
 #include "transcriber.h"
 #include "aligner.h"
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,10 @@ struct OfflinePipelineConfig {
     std::string plda_path;
     std::string coreml_path;       // embedding CoreML
     std::string seg_coreml_path;   // segmentation CoreML
+
+    // Progress callback: phase (0=whisper, 1=diarization, 2=alignment), progress (0-100)
+    // Optional — null check before calling.
+    std::function<void(int phase, int progress)> progress_callback;
 
     // Whisper config
     TranscriberConfig transcriber;

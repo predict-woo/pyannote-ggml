@@ -4,8 +4,9 @@
 OfflineTranscribeWorker::OfflineTranscribeWorker(Napi::Env env,
                                                    PipelineModel* model,
                                                    std::vector<float>&& audio,
-                                                   Napi::Promise::Deferred deferred)
-    : Napi::AsyncWorker(env),
+                                                   Napi::Promise::Deferred deferred,
+                                                   Napi::Function progress_callback)
+    : Napi::AsyncProgressQueueWorker<ProgressData>(env),
       model_(model),
       audio_(std::move(audio)),
       deferred_(deferred),
@@ -22,9 +23,22 @@ OfflineTranscribeWorker::OfflineTranscribeWorker(Napi::Env env,
     config_.coreml_path     = pc.diarization.coreml_path;
     config_.seg_coreml_path = pc.diarization.seg_coreml_path;
     config_.transcriber     = pc.transcriber;
+
+    // Store progress callback reference (if provided)
+    if (!progress_callback.IsEmpty() && progress_callback.IsFunction()) {
+        progress_callback_ = Napi::Persistent(progress_callback);
+    }
 }
 
-void OfflineTranscribeWorker::Execute() {
+void OfflineTranscribeWorker::Execute(const ExecutionProgress& progress) {
+    // Wire C++ progress callback to send progress data to main thread
+    if (!progress_callback_.IsEmpty()) {
+        config_.progress_callback = [&progress](int phase, int prog) {
+            ProgressData data{phase, prog};
+            progress.Send(&data, 1);
+        };
+    }
+
     OfflinePipelineResult result;
     if (cache_) {
         result = offline_transcribe_with_cache(
@@ -40,6 +54,19 @@ void OfflineTranscribeWorker::Execute() {
     }
 
     cb_data_.segments = std::move(result.segments);
+}
+
+void OfflineTranscribeWorker::OnProgress(const ProgressData* data, size_t count) {
+    // Called on the main thread for each progress event
+    if (progress_callback_.IsEmpty()) return;
+
+    Napi::Env env = Env();
+    for (size_t i = 0; i < count; i++) {
+        progress_callback_.Value().Call({
+            Napi::Number::New(env, data[i].phase),
+            Napi::Number::New(env, data[i].progress)
+        });
+    }
 }
 
 void OfflineTranscribeWorker::OnOK() {

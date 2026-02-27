@@ -83,6 +83,20 @@ OfflinePipelineResult offline_transcribe(
     params.suppress_blank   = config.transcriber.suppress_blank;
     params.suppress_nst     = config.transcriber.suppress_nst;
 
+    // Progress callback — wire phase 0 (whisper) to whisper_full's progress_callback
+    struct ProgressBridge {
+        std::function<void(int,int)> cb;
+    };
+    ProgressBridge progress_bridge{config.progress_callback};
+
+    if (progress_bridge.cb) {
+        params.progress_callback = [](struct whisper_context*, struct whisper_state*, int progress, void* user_data) {
+            auto* bridge = static_cast<ProgressBridge*>(user_data);
+            if (bridge->cb) bridge->cb(0, progress);
+        };
+        params.progress_callback_user_data = &progress_bridge;
+    }
+
     const double audio_duration = static_cast<double>(n_samples) / 16000.0;
     fprintf(stderr, "Offline pipeline: running Whisper on %.1fs of audio...\n",
             audio_duration);
@@ -125,6 +139,9 @@ OfflinePipelineResult offline_transcribe(
     // Step 4: Run offline diarization
     // ================================================================
 
+    // Notify phase 1 — diarization start
+    if (config.progress_callback) config.progress_callback(1, 0);
+
     DiarizationConfig diar_config;
     diar_config.seg_model_path  = config.seg_model_path;
     diar_config.emb_model_path  = config.emb_model_path;
@@ -145,6 +162,9 @@ OfflinePipelineResult offline_transcribe(
     // ================================================================
     // Step 5: Align Whisper segments with diarization
     // ================================================================
+
+    // Notify phase 2 — alignment start
+    if (config.progress_callback) config.progress_callback(2, 0);
 
     out.segments = align_segments(transcribe_segments, diar_result);
     out.diarization = std::move(diar_result);
@@ -219,6 +239,20 @@ OfflinePipelineResult offline_transcribe_with_cache(
     params.suppress_blank   = config.transcriber.suppress_blank;
     params.suppress_nst     = config.transcriber.suppress_nst;
 
+    // Progress callback — wire phase 0 (whisper) to whisper_full's progress_callback
+    struct ProgressBridge {
+        std::function<void(int,int)> cb;
+    };
+    ProgressBridge progress_bridge{config.progress_callback};
+
+    if (progress_bridge.cb) {
+        params.progress_callback = [](struct whisper_context*, struct whisper_state*, int progress, void* user_data) {
+            auto* bridge = static_cast<ProgressBridge*>(user_data);
+            if (bridge->cb) bridge->cb(0, progress);
+        };
+        params.progress_callback_user_data = &progress_bridge;
+    }
+
     const double audio_duration = static_cast<double>(n_samples) / 16000.0;
     fprintf(stderr, "Offline pipeline (cached): running Whisper on %.1fs of audio...\n",
             audio_duration);
@@ -256,6 +290,9 @@ OfflinePipelineResult offline_transcribe_with_cache(
     // Step 3: Run offline diarization (using cached models)
     // ================================================================
 
+    // Notify phase 1 — diarization start
+    if (config.progress_callback) config.progress_callback(1, 0);
+
     DiarizationConfig diar_config;
     diar_config.seg_model_path  = config.seg_model_path;
     diar_config.emb_model_path  = config.emb_model_path;
@@ -287,6 +324,9 @@ OfflinePipelineResult offline_transcribe_with_cache(
     // ================================================================
     // Step 4: Align Whisper segments with diarization
     // ================================================================
+
+    // Notify phase 2 — alignment start
+    if (config.progress_callback) config.progress_callback(2, 0);
 
     out.segments = align_segments(transcribe_segments, diar_result);
     out.diarization = std::move(diar_result);
