@@ -19,7 +19,7 @@ echo ""
 echo "=== Rebuilding native addon (cmake-js) ==="
 cd "$ADDON_DIR"
 npx cmake-js clean 2>/dev/null || true
-npx cmake-js build
+npx cmake-js build --CDEMBEDDING_COREML=ON --CDSEGMENTATION_COREML=ON --CDWHISPER_COREML=ON
 
 echo ""
 echo "=== Copying fresh addon to node_modules ==="
