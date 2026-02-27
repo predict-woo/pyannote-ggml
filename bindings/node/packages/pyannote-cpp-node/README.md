@@ -29,6 +29,7 @@ The API supports three modes: **offline** batch processing (`transcribeOffline`)
 - **Shared model cache**: all models loaded once during `Pipeline.load()`, reused across offline/streaming/session modes
 - **Runtime backend switching**: switch Whisper between GPU-only and CoreML-accelerated without reloading the pipeline
 - **Progress reporting**: optional `onProgress` callback for `transcribeOffline` reports Whisper, diarization, and alignment phases
+- **Real-time segment streaming**: optional `onSegment` callback for `transcribeOffline` delivers each Whisper segment (start, end, text) as it's produced — enables live transcript preview and time-based loading bars
 - TypeScript-first API with complete type definitions
 
 ## Requirements
@@ -93,7 +94,7 @@ pipeline.close();
 ```typescript
 class Pipeline {
   static async load(config: ModelConfig): Promise<Pipeline>;
-  async transcribeOffline(audio: Float32Array, onProgress?: (phase: number, progress: number) => void): Promise<TranscriptionResult>;
+  async transcribeOffline(audio: Float32Array, onProgress?: (phase: number, progress: number) => void, onSegment?: (start: number, end: number, text: string) => void): Promise<TranscriptionResult>;
   async transcribe(audio: Float32Array): Promise<TranscriptionResult>;
   setLanguage(language: string): void;
   setDecodeOptions(options: DecodeOptions): void;
@@ -108,7 +109,7 @@ class Pipeline {
 
 Validates model paths and loads all models (Whisper, CoreML segmentation/embedding, PLDA, and optionally VAD) into a shared cache on a background thread. Models are loaded once and reused across all subsequent `transcribe()`, `transcribeOffline()`, and `createSession()` calls — no redundant loading occurs when switching between modes. Models are freed only when `close()` is called.
 
-#### `async transcribeOffline(audio: Float32Array, onProgress?): Promise<TranscriptionResult>`
+#### `async transcribeOffline(audio: Float32Array, onProgress?, onSegment?): Promise<TranscriptionResult>`
 
 Runs Whisper on the **entire** audio buffer in a single `whisper_full()` call, then runs offline diarization and WhisperX-style speaker alignment. This is the fastest mode for batch processing — no streaming infrastructure is involved.
 
@@ -126,6 +127,28 @@ const result = await pipeline.transcribeOffline(audio, (phase, progress) => {
   if (phase === 1) console.log('Running diarization...');
   if (phase === 2) console.log('Aligning speakers...');
 });
+```
+
+The optional `onSegment` callback receives `(start, end, text)` for each Whisper segment as it's produced during transcription. Times are in seconds. This enables live transcript preview before diarization and alignment complete.
+
+```typescript
+const result = await pipeline.transcribeOffline(audio, undefined, (start, end, text) => {
+  console.log(`[${start.toFixed(2)}-${end.toFixed(2)}] ${text}`);
+});
+```
+
+Both callbacks can be used simultaneously:
+
+```typescript
+const result = await pipeline.transcribeOffline(
+  audio,
+  (phase, progress) => {
+    if (phase === 0) updateProgressBar(progress);
+  },
+  (start, end, text) => {
+    appendToTranscriptPreview(start, end, text);
+  },
+);
 ```
 
 #### `async transcribe(audio: Float32Array): Promise<TranscriptionResult>`
@@ -439,12 +462,12 @@ async function runOffline(audio: Float32Array) {
 }
 ```
 
-### Offline transcription with progress reporting
+### Offline transcription with progress and live transcript preview
 
 ```typescript
 import { Pipeline } from 'pyannote-cpp-node';
 
-async function runOfflineWithProgress(audio: Float32Array) {
+async function runOfflineWithCallbacks(audio: Float32Array) {
   const pipeline = await Pipeline.load({
     segModelPath: './models/segmentation.gguf',
     embModelPath: './models/embedding.gguf',
@@ -454,21 +477,21 @@ async function runOfflineWithProgress(audio: Float32Array) {
     whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
   });
 
-  const result = await pipeline.transcribeOffline(audio, (phase, progress) => {
-    switch (phase) {
-      case 0: // Whisper transcription (0-100%)
-        updateProgressBar(progress);
-        break;
-      case 1: // Diarization started
-        showStatus('Identifying speakers...');
-        break;
-      case 2: // Alignment started
-        showStatus('Aligning speakers to transcript...');
-        break;
-    }
-  });
+  const result = await pipeline.transcribeOffline(
+    audio,
+    // Progress callback — phase 0 is Whisper (0-100%), phase 1 is diarization, phase 2 is alignment
+    (phase, progress) => {
+      if (phase === 0) updateProgressBar(progress);
+      if (phase === 1) showStatus('Identifying speakers...');
+      if (phase === 2) showStatus('Aligning speakers to transcript...');
+    },
+    // Segment callback — each Whisper segment as it's produced (before diarization)
+    (start, end, text) => {
+      appendToLivePreview(`[${start.toFixed(2)}-${end.toFixed(2)}] ${text}`);
+    },
+  );
 
-  console.log(`Done: ${result.segments.length} segments`);
+  console.log(`Done: ${result.segments.length} speaker-labeled segments`);
   pipeline.close();
 }
 ```
