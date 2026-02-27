@@ -27,6 +27,8 @@ The API supports three modes: **offline** batch processing (`transcribeOffline`)
 - Deterministic output for the same audio/models/config
 - CoreML-accelerated inference on macOS
 - **Shared model cache**: all models loaded once during `Pipeline.load()`, reused across offline/streaming/session modes
+- **Runtime backend switching**: switch Whisper between GPU-only and CoreML-accelerated without reloading the pipeline
+- **Progress reporting**: optional `onProgress` callback for `transcribeOffline` reports Whisper, diarization, and alignment phases
 - TypeScript-first API with complete type definitions
 
 ## Requirements
@@ -91,7 +93,7 @@ pipeline.close();
 ```typescript
 class Pipeline {
   static async load(config: ModelConfig): Promise<Pipeline>;
-  async transcribeOffline(audio: Float32Array): Promise<TranscriptionResult>;
+  async transcribeOffline(audio: Float32Array, onProgress?: (phase: number, progress: number) => void): Promise<TranscriptionResult>;
   async transcribe(audio: Float32Array): Promise<TranscriptionResult>;
   setLanguage(language: string): void;
   setDecodeOptions(options: DecodeOptions): void;
@@ -106,9 +108,25 @@ class Pipeline {
 
 Validates model paths and loads all models (Whisper, CoreML segmentation/embedding, PLDA, and optionally VAD) into a shared cache on a background thread. Models are loaded once and reused across all subsequent `transcribe()`, `transcribeOffline()`, and `createSession()` calls — no redundant loading occurs when switching between modes. Models are freed only when `close()` is called.
 
-#### `async transcribeOffline(audio: Float32Array): Promise<TranscriptionResult>`
+#### `async transcribeOffline(audio: Float32Array, onProgress?): Promise<TranscriptionResult>`
 
 Runs Whisper on the **entire** audio buffer in a single `whisper_full()` call, then runs offline diarization and WhisperX-style speaker alignment. This is the fastest mode for batch processing — no streaming infrastructure is involved.
+
+The optional `onProgress` callback receives `(phase, progress)` updates:
+
+| Phase | Value | Meaning |
+| --- | --- | --- |
+| `0` | `0`–`100` | Whisper transcription progress (percentage) |
+| `1` | `0` | Diarization started |
+| `2` | `0` | Speaker alignment started |
+
+```typescript
+const result = await pipeline.transcribeOffline(audio, (phase, progress) => {
+  if (phase === 0) console.log(`Transcribing: ${progress}%`);
+  if (phase === 1) console.log('Running diarization...');
+  if (phase === 2) console.log('Aligning speakers...');
+});
+```
 
 #### `async transcribe(audio: Float32Array): Promise<TranscriptionResult>`
 
@@ -421,6 +439,40 @@ async function runOffline(audio: Float32Array) {
 }
 ```
 
+### Offline transcription with progress reporting
+
+```typescript
+import { Pipeline } from 'pyannote-cpp-node';
+
+async function runOfflineWithProgress(audio: Float32Array) {
+  const pipeline = await Pipeline.load({
+    segModelPath: './models/segmentation.gguf',
+    embModelPath: './models/embedding.gguf',
+    pldaPath: './models/plda.gguf',
+    coremlPath: './models/embedding.mlpackage',
+    segCoremlPath: './models/segmentation.mlpackage',
+    whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
+  });
+
+  const result = await pipeline.transcribeOffline(audio, (phase, progress) => {
+    switch (phase) {
+      case 0: // Whisper transcription (0-100%)
+        updateProgressBar(progress);
+        break;
+      case 1: // Diarization started
+        showStatus('Identifying speakers...');
+        break;
+      case 2: // Alignment started
+        showStatus('Aligning speakers to transcript...');
+        break;
+    }
+  });
+
+  console.log(`Done: ${result.segments.length} segments`);
+  pipeline.close();
+}
+```
+
 ### One-shot transcription (streaming internals)
 
 ```typescript
@@ -564,6 +616,34 @@ pipeline.setDecodeOptions({
   beamSize: 5,
 });
 const result3 = await pipeline.transcribe(chineseAudio);
+
+pipeline.close();
+```
+
+### Switching Whisper backend at runtime
+
+```typescript
+import { Pipeline } from 'pyannote-cpp-node';
+
+// Start with GPU-only Whisper (default)
+const pipeline = await Pipeline.load({
+  segModelPath: './models/segmentation.gguf',
+  embModelPath: './models/embedding.gguf',
+  pldaPath: './models/plda.gguf',
+  coremlPath: './models/embedding.mlpackage',
+  segCoremlPath: './models/segmentation.mlpackage',
+  whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
+  useCoreml: false,
+});
+
+// Switch to CoreML-accelerated Whisper encoder at runtime
+// (requires ggml-large-v3-turbo-q5_0-encoder.mlmodelc next to the GGUF)
+await pipeline.setUseCoreml(true);
+const result1 = await pipeline.transcribeOffline(audio);
+
+// Switch back to GPU-only
+await pipeline.setUseCoreml(false);
+const result2 = await pipeline.transcribeOffline(audio);
 
 pipeline.close();
 ```
