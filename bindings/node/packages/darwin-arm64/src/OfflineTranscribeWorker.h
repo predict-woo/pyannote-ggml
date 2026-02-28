@@ -20,6 +20,7 @@ struct SegmentData {
 
 struct OfflineTranscribeCallbackData {
     std::vector<AlignedSegment> segments;
+    std::vector<float> filtered_audio;
 };
 
 class OfflineTranscribeWorker : public Napi::AsyncProgressQueueWorker<ProgressData> {

@@ -1,5 +1,6 @@
 #include "OfflineTranscribeWorker.h"
 #include "PipelineModel.h"
+#include <cstring>
 
 OfflineTranscribeWorker::OfflineTranscribeWorker(Napi::Env env,
                                                    PipelineModel* model,
@@ -82,6 +83,7 @@ void OfflineTranscribeWorker::Execute(const ExecutionProgress& progress) {
     }
 
     cb_data_.segments = std::move(result.segments);
+    cb_data_.filtered_audio = std::move(result.filtered_audio);
 }
 
 void OfflineTranscribeWorker::OnProgress(const ProgressData* data, size_t count) {
@@ -122,6 +124,22 @@ void OfflineTranscribeWorker::OnOK() {
 
     Napi::Object result = Napi::Object::New(env);
     result.Set("segments", jsSegments);
+
+    // Return silence-filtered audio if VAD filtering was applied
+    if (!cb_data_.filtered_audio.empty()) {
+        const size_t byte_length = cb_data_.filtered_audio.size() * sizeof(float);
+        auto* data = new std::vector<float>(std::move(cb_data_.filtered_audio));
+        auto buffer = Napi::ArrayBuffer::New(
+            env,
+            data->data(),
+            byte_length,
+            [](Napi::Env, void*, void* hint) {
+                delete static_cast<std::vector<float>*>(hint);
+            },
+            data);
+        result.Set("filteredAudio",
+                   Napi::Float32Array::New(env, data->size(), buffer, 0));
+    }
 
     model_->SetBusy(false);
     deferred_.Resolve(result);

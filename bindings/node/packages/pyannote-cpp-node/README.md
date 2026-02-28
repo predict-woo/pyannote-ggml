@@ -247,6 +247,8 @@ Flushes all stages, runs final recluster + alignment, and returns the definitive
 ```typescript
 type TranscriptionResult = {
   segments: AlignedSegment[];
+  /** Silence-filtered audio when VAD model is loaded. Timestamps align to this audio. */
+  filteredAudio?: Float32Array;
 };
 ```
 
@@ -430,6 +432,14 @@ export interface AlignedSegment {
 export interface TranscriptionResult {
   /** Full speaker-labeled transcript segments. */
   segments: AlignedSegment[];
+  /**
+   * Silence-filtered audio (16 kHz mono Float32Array).
+   * Present when a VAD model is loaded (`vadModelPath` in config).
+   * Silence longer than 2 seconds is compressed to 2 seconds.
+   * All segment timestamps are aligned to this audio —
+   * save it directly and timestamps will sync correctly.
+   */
+  filteredAudio?: Float32Array;
 }
 ```
 
@@ -452,6 +462,43 @@ async function runOffline(audio: Float32Array) {
 
   // Runs Whisper on full audio at once + offline diarization
   const result = await pipeline.transcribeOffline(audio);
+
+  for (const seg of result.segments) {
+    const end = seg.start + seg.duration;
+    console.log(`[${seg.speaker}] ${seg.start.toFixed(2)}-${end.toFixed(2)} ${seg.text.trim()}`);
+  }
+
+  pipeline.close();
+}
+```
+
+### Offline transcription with silence filtering
+
+When a VAD model is provided, `transcribeOffline` automatically compresses silence longer than 2 seconds down to 2 seconds before running Whisper and diarization. The filtered audio is returned alongside segments so you can save it with correctly aligned timestamps.
+
+```typescript
+import { Pipeline } from 'pyannote-cpp-node';
+import { writeFileSync } from 'node:fs';
+
+async function runOfflineWithVAD(audio: Float32Array) {
+  const pipeline = await Pipeline.load({
+    segModelPath: './models/segmentation.gguf',
+    embModelPath: './models/embedding.gguf',
+    pldaPath: './models/plda.gguf',
+    coremlPath: './models/embedding.mlpackage',
+    segCoremlPath: './models/segmentation.mlpackage',
+    whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
+    vadModelPath: './models/ggml-silero-v6.2.0.bin', // enables silence filtering
+  });
+
+  const result = await pipeline.transcribeOffline(audio);
+
+  // Save the silence-filtered audio — timestamps in result.segments align to this
+  if (result.filteredAudio) {
+    // filteredAudio is 16 kHz mono Float32Array with silence compressed
+    writeFileSync('./output-filtered.pcm', Buffer.from(result.filteredAudio.buffer));
+    console.log(`Filtered: ${audio.length} -> ${result.filteredAudio.length} samples`);
+  }
 
   for (const seg of result.segments) {
     const end = seg.start + seg.duration;
@@ -722,9 +769,11 @@ All API methods expect decoded PCM samples; file decoding/resampling is handled 
 
 ### Offline mode (`transcribeOffline`)
 
-1. Single `whisper_full()` call on entire audio
-2. Offline diarization (segmentation → powerset → embeddings → PLDA → AHC → VBx)
-3. WhisperX-style alignment (speaker assignment by maximum segment overlap)
+1. VAD silence filter (optional — compresses silence >2s to 2s when `vadModelPath` provided)
+2. Single `whisper_full()` call on filtered audio
+3. Offline diarization (segmentation → powerset → embeddings → PLDA → AHC → VBx) on filtered audio
+4. WhisperX-style alignment (speaker assignment by maximum segment overlap)
+5. Return segments + filtered audio bytes (timestamps aligned to filtered audio)
 
 ### Streaming mode (`transcribe` / `createSession`)
 

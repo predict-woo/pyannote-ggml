@@ -31,6 +31,7 @@ struct OfflinePipelineConfig {
 struct OfflinePipelineResult {
     std::vector<AlignedSegment> segments;
     DiarizationResult diarization;  // raw diarization result
+    std::vector<float> filtered_audio;  // silence-compressed audio (empty if no VAD)
     bool valid = false;
 };
 

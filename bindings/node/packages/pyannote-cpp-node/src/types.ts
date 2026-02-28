@@ -117,5 +117,14 @@ export interface AlignedSegment {
 }
 
 export interface TranscriptionResult {
+  /** Full speaker-labeled transcript segments. */
   segments: AlignedSegment[];
+  /**
+   * Silence-filtered audio (16 kHz mono Float32Array).
+   * Present when a VAD model is loaded (`vadModelPath` in config).
+   * Silence longer than 2 seconds is compressed to 2 seconds.
+   * All segment timestamps are aligned to this audio —
+   * save it directly and timestamps will sync correctly.
+   */
+  filteredAudio?: Float32Array;
 }

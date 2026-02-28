@@ -1,6 +1,7 @@
 #include "offline_pipeline.h"
 #include "whisper.h"
 #include "model_cache.h"
+#include "silence_filter.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -216,6 +217,43 @@ OfflinePipelineResult offline_transcribe_with_cache(
     fprintf(stderr, "Offline pipeline (cached): using pre-loaded Whisper context\n");
 
     // ================================================================
+    // Step 0: Silence filtering (if VAD model loaded)
+    // ================================================================
+
+    std::vector<float> filtered_audio;
+    const float* process_audio = audio;
+    int process_n_samples = n_samples;
+
+    if (cache->vad_ctx) {
+        SilenceFilter* sf = silence_filter_init(cache->vad_ctx);
+
+        // Push in 1-second chunks to avoid O(n^2) pending-vector reshuffle.
+        // silence_filter_push appends to an internal pending vector then erases
+        // from the front in 512-sample windows — pushing all at once would shift
+        // millions of elements per iteration.
+        constexpr int kChunkSize = 16000;  // 1 second
+        for (int offset = 0; offset < n_samples; offset += kChunkSize) {
+            int chunk_len = std::min(kChunkSize, n_samples - offset);
+            SilenceFilterResult sfr = silence_filter_push(sf, audio + offset, chunk_len);
+            filtered_audio.insert(filtered_audio.end(),
+                                  sfr.audio.begin(), sfr.audio.end());
+        }
+
+        SilenceFilterResult sfr_flush = silence_filter_flush(sf);
+        filtered_audio.insert(filtered_audio.end(),
+                              sfr_flush.audio.begin(), sfr_flush.audio.end());
+
+        silence_filter_free(sf);
+
+        process_audio = filtered_audio.data();
+        process_n_samples = static_cast<int>(filtered_audio.size());
+
+        fprintf(stderr, "Offline pipeline (cached): silence filtered %.1fs -> %.1fs\n",
+                static_cast<double>(n_samples) / 16000.0,
+                static_cast<double>(process_n_samples) / 16000.0);
+    }
+
+    // ================================================================
     // Step 1: Run whisper_full() on entire audio (using cached context)
     // ================================================================
 
@@ -295,11 +333,11 @@ OfflinePipelineResult offline_transcribe_with_cache(
         params.new_segment_callback_user_data = &segment_bridge;
     }
 
-    const double audio_duration = static_cast<double>(n_samples) / 16000.0;
+    const double audio_duration = static_cast<double>(process_n_samples) / 16000.0;
     fprintf(stderr, "Offline pipeline (cached): running Whisper on %.1fs of audio...\n",
             audio_duration);
 
-    int ret = whisper_full(cache->whisper_ctx, params, audio, n_samples);
+    int ret = whisper_full(cache->whisper_ctx, params, process_audio, process_n_samples);
     if (ret != 0) {
         fprintf(stderr, "ERROR: offline_transcribe_with_cache: whisper_full failed (code %d)\n", ret);
         return out;
@@ -346,7 +384,7 @@ OfflinePipelineResult offline_transcribe_with_cache(
     DiarizationResult diar_result;
 
 #if defined(SEGMENTATION_USE_COREML) && defined(EMBEDDING_USE_COREML)
-    if (!diarize_from_samples_with_models(diar_config, audio, n_samples,
+    if (!diarize_from_samples_with_models(diar_config, process_audio, process_n_samples,
                                           cache->seg_coreml_ctx, cache->emb_coreml_ctx,
                                           cache->plda, diar_result)) {
         fprintf(stderr, "ERROR: offline_transcribe_with_cache: diarization failed\n");
@@ -354,7 +392,7 @@ OfflinePipelineResult offline_transcribe_with_cache(
     }
 #else
     // Fallback: use path-based loading (models in cache may not be available)
-    if (!diarize_from_samples(diar_config, audio, n_samples, diar_result)) {
+    if (!diarize_from_samples(diar_config, process_audio, process_n_samples, diar_result)) {
         fprintf(stderr, "ERROR: offline_transcribe_with_cache: diarization failed\n");
         return out;
     }
@@ -372,6 +410,7 @@ OfflinePipelineResult offline_transcribe_with_cache(
 
     out.segments = align_segments(transcribe_segments, diar_result);
     out.diarization = std::move(diar_result);
+    out.filtered_audio = std::move(filtered_audio);
     out.valid = true;
 
     fprintf(stderr, "Offline pipeline (cached): %zu aligned segments\n", out.segments.size());
