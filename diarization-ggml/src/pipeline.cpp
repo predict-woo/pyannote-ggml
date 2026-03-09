@@ -22,6 +22,7 @@ struct PendingSubmission {
 };
 
 struct PipelineState {
+    PipelineConfig config;
     SilenceFilter* silence_filter;
     AudioBuffer audio_buffer;
     StreamingState* streaming_state;
@@ -104,6 +105,7 @@ static void handle_whisper_result(PipelineState* state, const TranscribeResult& 
 
 PipelineState* pipeline_init(const PipelineConfig& config, pipeline_callback cb, pipeline_audio_callback audio_cb, void* user_data) {
     auto* state = new PipelineState();
+    state->config = config;
     state->callback = cb;
     state->audio_callback = audio_cb;
     state->user_data = user_data;
@@ -127,6 +129,12 @@ PipelineState* pipeline_init(const PipelineConfig& config, pipeline_callback cb,
 
     StreamingConfig diar_config = config.diarization;
     diar_config.zero_latency = true;
+    if (config.transcription_only) {
+        diar_config.transcription_only = true;
+        diar_config.coreml_path = "";
+        diar_config.plda_path = "";
+        diar_config.emb_model_path = "";
+    }
     state->streaming_state = streaming_init(diar_config);
     if (!state->streaming_state) {
         fprintf(stderr, "ERROR: failed to init streaming diarization\n");
@@ -173,6 +181,7 @@ PipelineState* pipeline_init_with_cache(
     }
 
     auto* state = new PipelineState();
+    state->config = config;
     state->callback = cb;
     state->audio_callback = audio_cb;
     state->user_data = user_data;
@@ -194,8 +203,16 @@ PipelineState* pipeline_init_with_cache(
     // Use borrowed diarization models from cache
     StreamingConfig diar_config = config.diarization;
     diar_config.zero_latency = true;
-    state->streaming_state = streaming_init_with_models(
-        diar_config, cache->seg_coreml_ctx, cache->emb_coreml_ctx, cache->plda);
+    if (config.transcription_only) {
+        diar_config.transcription_only = true;
+    }
+    if (config.transcription_only) {
+        state->streaming_state = streaming_init_with_models(
+            diar_config, cache->seg_coreml_ctx, nullptr, diarization::PLDAModel{});
+    } else {
+        state->streaming_state = streaming_init_with_models(
+            diar_config, cache->seg_coreml_ctx, cache->emb_coreml_ctx, cache->plda);
+    }
     if (!state->streaming_state) {
         fprintf(stderr, "ERROR: failed to init streaming diarization (with cache)\n");
         silence_filter_free(state->silence_filter);
@@ -270,8 +287,27 @@ std::vector<bool> pipeline_push(PipelineState* state, const float* samples, int 
 
     TranscribeResult result;
     if (state->whisper_in_flight && transcriber_try_get_result(state->transcriber, result)) {
-        DiarizationResult diarization = streaming_recluster(state->streaming_state);
-        handle_whisper_result(state, result, diarization);
+        if (state->config.transcription_only) {
+            if (result.valid && !result.segments.empty()) {
+                state->all_transcribe_segments.insert(state->all_transcribe_segments.end(),
+                    result.segments.begin(), result.segments.end());
+                state->all_segments.clear();
+                for (const auto& ts : state->all_transcribe_segments) {
+                    AlignedSegment seg;
+                    seg.speaker = "";
+                    seg.start = ts.start;
+                    seg.duration = ts.end - ts.start;
+                    seg.text = ts.text;
+                    state->all_segments.push_back(seg);
+                }
+                if (state->callback) {
+                    state->callback(state->all_segments, state->user_data);
+                }
+            }
+        } else {
+            DiarizationResult diarization = streaming_recluster(state->streaming_state);
+            handle_whisper_result(state, result, diarization);
+        }
         state->whisper_in_flight = false;
         try_submit_next(state);
     }
@@ -310,24 +346,48 @@ void pipeline_finalize(PipelineState* state) {
     while (state->whisper_in_flight || !state->submission_queue.empty()) {
         if (state->whisper_in_flight) {
             TranscribeResult result = transcriber_wait_result(state->transcriber);
-            DiarizationResult diarization = streaming_recluster(state->streaming_state);
-            handle_whisper_result(state, result, diarization);
+            if (state->config.transcription_only) {
+                if (result.valid && !result.segments.empty()) {
+                    state->all_transcribe_segments.insert(state->all_transcribe_segments.end(),
+                        result.segments.begin(), result.segments.end());
+                }
+            } else {
+                DiarizationResult diarization = streaming_recluster(state->streaming_state);
+                handle_whisper_result(state, result, diarization);
+            }
             state->whisper_in_flight = false;
         }
         try_submit_next(state);
     }
 
-    // Run final diarization with all accumulated data
-    fprintf(stderr, "[pipeline] finalize: running streaming_finalize recluster\n");
-    DiarizationResult final_diarization = streaming_finalize(state->streaming_state);
-    fprintf(stderr, "[pipeline] finalize: final diarization has %zu segments\n", final_diarization.segments.size());
+    if (state->config.transcription_only) {
+        if (!state->all_transcribe_segments.empty()) {
+            state->all_segments.clear();
+            for (const auto& ts : state->all_transcribe_segments) {
+                AlignedSegment seg;
+                seg.speaker = "";
+                seg.start = ts.start;
+                seg.duration = ts.end - ts.start;
+                seg.text = ts.text;
+                state->all_segments.push_back(seg);
+            }
+            if (state->callback) {
+                state->callback(state->all_segments, state->user_data);
+            }
+        }
+    } else {
+        // Run final diarization with all accumulated data
+        fprintf(stderr, "[pipeline] finalize: running streaming_finalize recluster\n");
+        DiarizationResult final_diarization = streaming_finalize(state->streaming_state);
+        fprintf(stderr, "[pipeline] finalize: final diarization has %zu segments\n", final_diarization.segments.size());
 
-    if (!state->all_transcribe_segments.empty()) {
-        state->all_segments = align_segments(state->all_transcribe_segments, final_diarization);
-        fprintf(stderr, "[pipeline] finalize: final re-alignment produced %zu segments from %zu transcribe segments\n",
-                state->all_segments.size(), state->all_transcribe_segments.size());
-        if (state->callback) {
-            state->callback(state->all_segments, state->user_data);
+        if (!state->all_transcribe_segments.empty()) {
+            state->all_segments = align_segments(state->all_transcribe_segments, final_diarization);
+            fprintf(stderr, "[pipeline] finalize: final re-alignment produced %zu segments from %zu transcribe segments\n",
+                    state->all_segments.size(), state->all_transcribe_segments.size());
+            if (state->callback) {
+                state->callback(state->all_segments, state->user_data);
+            }
         }
     }
 

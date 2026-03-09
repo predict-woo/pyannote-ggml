@@ -89,66 +89,68 @@ static bool process_one_chunk(StreamingState* state, int total_samples) {
         chunk_binarized.begin(),
         chunk_binarized.end());
 
-    embedding::fbank_result fbank =
-        embedding::compute_fbank(cropped.data(), CHUNK_SAMPLES, SAMPLE_RATE);
-    const int num_fbank_frames = fbank.num_frames;
+    if (!state->config.transcription_only) {
+        embedding::fbank_result fbank =
+            embedding::compute_fbank(cropped.data(), CHUNK_SAMPLES, SAMPLE_RATE);
+        const int num_fbank_frames = fbank.num_frames;
 
-    for (int s = 0; s < NUM_LOCAL_SPEAKERS; s++) {
-        bool all_zero = true;
-        for (int f = 0; f < FRAMES_PER_CHUNK; f++) {
-            if (chunk_binarized[f * NUM_LOCAL_SPEAKERS + s] != 0.0f) {
-                all_zero = false;
-                break;
-            }
-        }
-
-        std::vector<float> embedding(EMBEDDING_DIM);
-
-        if (all_zero) {
-            const float nan_val = std::nanf("");
-            for (int d = 0; d < EMBEDDING_DIM; d++) {
-                embedding[d] = nan_val;
-            }
-        } else {
-            std::vector<float> masked_fbank(fbank.data);
-
-            for (int ft = 0; ft < num_fbank_frames; ft++) {
-                int seg_frame =
-                    static_cast<int>(
-                        static_cast<long long>(ft) * FRAMES_PER_CHUNK / num_fbank_frames);
-                if (seg_frame >= FRAMES_PER_CHUNK) {
-                    seg_frame = FRAMES_PER_CHUNK - 1;
-                }
-
-                const float mask_val = chunk_binarized[seg_frame * NUM_LOCAL_SPEAKERS + s];
-                if (mask_val == 0.0f) {
-                    std::memset(&masked_fbank[ft * FBANK_NUM_BINS], 0,
-                               FBANK_NUM_BINS * sizeof(float));
+        for (int s = 0; s < NUM_LOCAL_SPEAKERS; s++) {
+            bool all_zero = true;
+            for (int f = 0; f < FRAMES_PER_CHUNK; f++) {
+                if (chunk_binarized[f * NUM_LOCAL_SPEAKERS + s] != 0.0f) {
+                    all_zero = false;
+                    break;
                 }
             }
+
+            std::vector<float> embedding(EMBEDDING_DIM);
+
+            if (all_zero) {
+                const float nan_val = std::nanf("");
+                for (int d = 0; d < EMBEDDING_DIM; d++) {
+                    embedding[d] = nan_val;
+                }
+            } else {
+                std::vector<float> masked_fbank(fbank.data);
+
+                for (int ft = 0; ft < num_fbank_frames; ft++) {
+                    int seg_frame =
+                        static_cast<int>(
+                            static_cast<long long>(ft) * FRAMES_PER_CHUNK / num_fbank_frames);
+                    if (seg_frame >= FRAMES_PER_CHUNK) {
+                        seg_frame = FRAMES_PER_CHUNK - 1;
+                    }
+
+                    const float mask_val = chunk_binarized[seg_frame * NUM_LOCAL_SPEAKERS + s];
+                    if (mask_val == 0.0f) {
+                        std::memset(&masked_fbank[ft * FBANK_NUM_BINS], 0,
+                                   FBANK_NUM_BINS * sizeof(float));
+                    }
+                }
 
 #ifdef EMBEDDING_USE_COREML
-            if (state->emb_coreml_ctx) {
-                embedding_coreml_encode(state->emb_coreml_ctx,
-                                       static_cast<int64_t>(num_fbank_frames),
-                                       masked_fbank.data(),
-                                       embedding.data());
-            } else {
-                fprintf(stderr, "Error: no embedding model available\n");
-                continue;
-            }
+                if (state->emb_coreml_ctx) {
+                    embedding_coreml_encode(state->emb_coreml_ctx,
+                                           static_cast<int64_t>(num_fbank_frames),
+                                           masked_fbank.data(),
+                                           embedding.data());
+                } else {
+                    fprintf(stderr, "Error: no embedding model available\n");
+                    continue;
+                }
 #else
-            fprintf(stderr, "Error: non-CoreML embedding not supported in streaming\n");
-            continue;
+                fprintf(stderr, "Error: non-CoreML embedding not supported in streaming\n");
+                continue;
 #endif
-        }
+            }
 
-        state->embeddings.insert(
-            state->embeddings.end(),
-            embedding.begin(),
-            embedding.end());
-        state->chunk_idx.push_back(state->chunks_processed);
-        state->local_speaker_idx.push_back(s);
+            state->embeddings.insert(
+                state->embeddings.end(),
+                embedding.begin(),
+                embedding.end());
+            state->chunk_idx.push_back(state->chunks_processed);
+            state->local_speaker_idx.push_back(s);
+        }
     }
 
     state->chunks_processed++;

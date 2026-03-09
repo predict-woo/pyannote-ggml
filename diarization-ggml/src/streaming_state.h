@@ -13,6 +13,7 @@ struct StreamingConfig {
     std::string coreml_path;
     std::string seg_coreml_path;
     bool zero_latency = false;
+    bool transcription_only = false;
 };
 
 struct StreamingState {
