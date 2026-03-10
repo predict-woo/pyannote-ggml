@@ -9,7 +9,7 @@ Node.js native bindings for Whisper transcription with optional speaker diarizat
 
 `pyannote-cpp-node` exposes the integrated C++ pipeline that combines Whisper transcription and optional speaker diarization into a single API (`transcriptionOnly: true` skips diarization).
 
-Given 16 kHz mono PCM audio (`Float32Array`), it produces cumulative and final transcript segments shaped as:
+Given 16 kHz mono PCM audio (`Float32Array`), it produces transcript segments shaped as below. In streaming mode, diarization emits cumulative `segments` events, while `transcriptionOnly: true` emits incremental `segments` events. `finalize()` returns all segments in both modes.
 
 - speaker label (`SPEAKER_00`, `SPEAKER_01`, ...), or empty string (`""`) when `transcriptionOnly` is `true`
 - segment start/duration in seconds
@@ -266,7 +266,7 @@ Updates one or more Whisper decode options on the live streaming session. Takes 
 
 #### `async finalize(): Promise<TranscriptionResult>`
 
-Flushes all stages, runs final recluster + alignment, and returns the definitive result.
+Flushes all stages, runs final recluster + alignment, and returns the definitive result. `finalize()` always returns all accumulated segments regardless of mode. In diarization mode this is the final re-aligned output, and in transcription-only mode this is the union of all incremental `segments` emissions.
 
 ```typescript
 type TranscriptionResult = {
@@ -286,11 +286,30 @@ Returns `true` after `close()`.
 
 #### Event: `'segments'`
 
-Emitted after each Whisper transcription result with the latest cumulative aligned output.
+Emitted after each Whisper transcription result. Behavior depends on mode:
+
+- With diarization (default): each emission contains all segments re-aligned against the latest speaker clustering. Earlier segments may get updated speaker labels as more data arrives. The final emission after `finalize()` is the definitive output.
+- With `transcriptionOnly: true`: each emission contains only the new segments from the latest Whisper result. Earlier segments never change, so incremental delivery is safe. Accumulate across emissions to build the full transcript.
 
 ```typescript
+// With diarization (default): cumulative, re-aligned output
 session.on('segments', (segments: AlignedSegment[]) => {
-  // `segments` contains the latest cumulative speaker-labeled transcript
+  // `segments` contains the latest full speaker-labeled transcript so far
+  const latest = segments[segments.length - 1];
+  if (latest) {
+    const end = latest.start + latest.duration;
+    console.log(`[${latest.speaker}] ${latest.start.toFixed(2)}-${end.toFixed(2)} ${latest.text.trim()}`);
+  }
+});
+
+// With transcriptionOnly: incremental output, accumulate manually
+const allSegments: AlignedSegment[] = [];
+session.on('segments', (newSegments: AlignedSegment[]) => {
+  allSegments.push(...newSegments);
+  for (const seg of newSegments) {
+    const end = seg.start + seg.duration;
+    console.log(`${seg.start.toFixed(2)}-${end.toFixed(2)} ${seg.text.trim()}`);
+  }
 });
 ```
 
@@ -616,6 +635,7 @@ async function runStreaming(audio: Float32Array) {
   });
 
   const session = pipeline.createSession();
+  // Diarization mode (default): each event is cumulative and may relabel earlier segments
   session.on('segments', (segments) => {
     const latest = segments[segments.length - 1];
     if (latest) {
@@ -640,6 +660,44 @@ async function runStreaming(audio: Float32Array) {
 
   const finalResult = await session.finalize();
   console.log(`Final segments: ${finalResult.segments.length}`);
+
+  session.close();
+  pipeline.close();
+}
+```
+
+```typescript
+import { Pipeline, type AlignedSegment } from 'pyannote-cpp-node';
+
+async function runStreamingTranscriptionOnly(audio: Float32Array) {
+  const pipeline = await Pipeline.load({
+    segModelPath: './models/segmentation.gguf',
+    segCoremlPath: './models/segmentation.mlpackage',
+    whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
+    transcriptionOnly: true,
+  });
+
+  const session = pipeline.createSession();
+
+  // Transcription-only: each event has only NEW segments
+  const allSegments: AlignedSegment[] = [];
+  session.on('segments', (newSegments) => {
+    allSegments.push(...newSegments);
+    for (const seg of newSegments) {
+      const end = seg.start + seg.duration;
+      console.log(`${seg.start.toFixed(2)}-${end.toFixed(2)} ${seg.text.trim()}`);
+    }
+  });
+
+  const chunkSize = 16000;
+  for (let i = 0; i < audio.length; i += chunkSize) {
+    const chunk = audio.slice(i, Math.min(i + chunkSize, audio.length));
+    await session.push(chunk);
+  }
+
+  const finalResult = await session.finalize();
+  console.log(`Final segments from finalize(): ${finalResult.segments.length}`);
+  console.log(`Accumulated from incremental events: ${allSegments.length}`);
 
   session.close();
   pipeline.close();
@@ -834,7 +892,7 @@ The streaming pipeline runs in 7 stages:
 6. Finalize (flush + final recluster + final alignment)
 7. Callback/event emission (`segments` updates + `audio` chunk streaming)
 
-In transcription-only mode, steps 5 (alignment) and 6 (recluster) are skipped, and segments are emitted with an empty `speaker` field.
+In transcription-only mode, steps 5 (alignment) and 6 (recluster) are skipped, and segments are emitted with an empty `speaker` field. Each `segments` event contains only the new segments from that Whisper call (incremental), unlike diarization mode which re-emits all segments after each recluster (cumulative).
 
 ## Performance
 
