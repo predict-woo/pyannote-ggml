@@ -103,6 +103,33 @@ static void handle_whisper_result(PipelineState* state, const TranscribeResult& 
     }
 }
 
+static void handle_transcription_only_result(PipelineState* state, const TranscribeResult& result) {
+    if (!result.valid || result.segments.empty()) return;
+
+    // Accumulate for final state
+    state->all_transcribe_segments.insert(state->all_transcribe_segments.end(),
+                                           result.segments.begin(), result.segments.end());
+
+    // Build AlignedSegments from ONLY this result's segments
+    std::vector<AlignedSegment> new_segments;
+    for (const auto& ts : result.segments) {
+        AlignedSegment seg;
+        seg.speaker = "";
+        seg.start = ts.start;
+        seg.duration = ts.end - ts.start;
+        seg.text = ts.text;
+        new_segments.push_back(seg);
+    }
+
+    // Append to all_segments for accumulated state (finalize return value)
+    state->all_segments.insert(state->all_segments.end(),
+                                new_segments.begin(), new_segments.end());
+
+    if (state->callback) {
+        state->callback(new_segments, state->user_data);
+    }
+}
+
 PipelineState* pipeline_init(const PipelineConfig& config, pipeline_callback cb, pipeline_audio_callback audio_cb, void* user_data) {
     auto* state = new PipelineState();
     state->config = config;
@@ -288,22 +315,7 @@ std::vector<bool> pipeline_push(PipelineState* state, const float* samples, int 
     TranscribeResult result;
     if (state->whisper_in_flight && transcriber_try_get_result(state->transcriber, result)) {
         if (state->config.transcription_only) {
-            if (result.valid && !result.segments.empty()) {
-                state->all_transcribe_segments.insert(state->all_transcribe_segments.end(),
-                    result.segments.begin(), result.segments.end());
-                state->all_segments.clear();
-                for (const auto& ts : state->all_transcribe_segments) {
-                    AlignedSegment seg;
-                    seg.speaker = "";
-                    seg.start = ts.start;
-                    seg.duration = ts.end - ts.start;
-                    seg.text = ts.text;
-                    state->all_segments.push_back(seg);
-                }
-                if (state->callback) {
-                    state->callback(state->all_segments, state->user_data);
-                }
-            }
+            handle_transcription_only_result(state, result);
         } else {
             DiarizationResult diarization = streaming_recluster(state->streaming_state);
             handle_whisper_result(state, result, diarization);
@@ -347,10 +359,7 @@ void pipeline_finalize(PipelineState* state) {
         if (state->whisper_in_flight) {
             TranscribeResult result = transcriber_wait_result(state->transcriber);
             if (state->config.transcription_only) {
-                if (result.valid && !result.segments.empty()) {
-                    state->all_transcribe_segments.insert(state->all_transcribe_segments.end(),
-                        result.segments.begin(), result.segments.end());
-                }
+                handle_transcription_only_result(state, result);
             } else {
                 DiarizationResult diarization = streaming_recluster(state->streaming_state);
                 handle_whisper_result(state, result, diarization);
@@ -360,22 +369,7 @@ void pipeline_finalize(PipelineState* state) {
         try_submit_next(state);
     }
 
-    if (state->config.transcription_only) {
-        if (!state->all_transcribe_segments.empty()) {
-            state->all_segments.clear();
-            for (const auto& ts : state->all_transcribe_segments) {
-                AlignedSegment seg;
-                seg.speaker = "";
-                seg.start = ts.start;
-                seg.duration = ts.end - ts.start;
-                seg.text = ts.text;
-                state->all_segments.push_back(seg);
-            }
-            if (state->callback) {
-                state->callback(state->all_segments, state->user_data);
-            }
-        }
-    } else {
+    if (!state->config.transcription_only) {
         // Run final diarization with all accumulated data
         fprintf(stderr, "[pipeline] finalize: running streaming_finalize recluster\n");
         DiarizationResult final_diarization = streaming_finalize(state->streaming_state);
@@ -412,4 +406,10 @@ void pipeline_free(PipelineState* state) {
 void pipeline_set_decode_options(PipelineState* state, const DecodeOptions& opts) {
     if (!state || !state->transcriber) return;
     transcriber_set_decode_options(state->transcriber, opts);
+}
+
+const std::vector<AlignedSegment>& pipeline_get_all_segments(PipelineState* state) {
+    static const std::vector<AlignedSegment> empty;
+    if (!state) return empty;
+    return state->all_segments;
 }

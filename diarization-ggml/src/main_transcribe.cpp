@@ -648,6 +648,10 @@ int main(int argc, char** argv) {
 
     pipeline_finalize(state);
 
+    // Save accumulated segments before freeing state (incremental callbacks only capture last batch)
+    const auto& all = pipeline_get_all_segments(state);
+    callback_ctx.segments.assign(all.begin(), all.end());
+
     const auto t1 = std::chrono::steady_clock::now();
     pipeline_free(state);
 

@@ -21,7 +21,7 @@ void PipelineFinalizeWorker::OnOK() {
     Napi::Env env = Env();
     session_->SetBusy(false);
 
-    std::vector<AlignedSegment> segments = session_->GetLastSegments();
+    const std::vector<AlignedSegment>& segments = pipeline_get_all_segments(state_);
     Napi::Array segmentsArr = MarshalSegments(env, segments);
 
     Napi::Object result = Napi::Object::New(env);
