@@ -231,3 +231,4 @@ The entire build chain (CMakeLists.txt, C++ sources, TypeScript sources) worked 
 - TypeScript 5.7.x
 - 2026-03-10: Node `Pipeline.load` can support transcription-only safely by validating only `segModelPath`, `segCoremlPath`, and `whisperModelPath` unconditionally, then guarding `embModelPath`, `pldaPath`, and `coremlPath` behind `!transcriptionOnly`.
 - 2026-03-10: In native `PipelineModel`, `transcriptionOnly` must be read before required-string extraction so constructor logic can switch between `getStringProp` (required) and `getOptionalStringProp` (optional) for diarization-only model paths.
+- 2026-03-10: Transcription-only E2E parity against `diarization-ggml/build/bin/transcribe --no-diarize` requires test-side JSON serialization that omits `"speaker"` when `seg.speaker === ""`; otherwise byte-level comparisons fail despite equivalent semantic output.
