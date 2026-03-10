@@ -24,6 +24,8 @@ struct OfflinePipelineConfig {
     // Called for each new Whisper segment as it's produced. Optional.
     std::function<void(double start, double end, const std::string& text)> new_segment_callback;
 
+    bool transcription_only = false;
+
     // Whisper config
     TranscriberConfig transcriber;
 };

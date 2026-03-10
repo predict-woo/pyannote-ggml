@@ -250,26 +250,34 @@ static std::string trim_ascii_whitespace(const std::string& s) {
     return s.substr(start, end - start);
 }
 
-static void write_segments_json(FILE* out, const std::vector<AlignedSegment>& segments) {
+static void write_segments_json(FILE* out, const std::vector<AlignedSegment>& segments, bool no_speaker = false) {
     std::fprintf(out, "{\n  \"segments\": [\n");
     for (size_t s = 0; s < segments.size(); ++s) {
         const AlignedSegment& seg = segments[s];
         const std::string text = trim_ascii_whitespace(seg.text);
-        std::fprintf(out, "    {\"speaker\": \"%s\", \"start\": %.6f, \"duration\": %.6f, \"text\": \"%s\"}%s\n",
-                     json_escape(seg.speaker).c_str(),
-                     seg.start,
-                     seg.duration,
-                     json_escape(text).c_str(),
-                     (s + 1 == segments.size() ? "" : ","));
+        if (no_speaker) {
+            std::fprintf(out, "    {\"start\": %.6f, \"duration\": %.6f, \"text\": \"%s\"}%s\n",
+                         seg.start,
+                         seg.duration,
+                         json_escape(text).c_str(),
+                         (s + 1 == segments.size() ? "" : ","));
+        } else {
+            std::fprintf(out, "    {\"speaker\": \"%s\", \"start\": %.6f, \"duration\": %.6f, \"text\": \"%s\"}%s\n",
+                         json_escape(seg.speaker).c_str(),
+                         seg.start,
+                         seg.duration,
+                         json_escape(text).c_str(),
+                         (s + 1 == segments.size() ? "" : ","));
+        }
     }
     std::fprintf(out, "  ]\n}\n");
 }
 
-static bool write_segments_json_file(const std::string& path, const std::vector<AlignedSegment>& segments) {
+static bool write_segments_json_file(const std::string& path, const std::vector<AlignedSegment>& segments, bool no_speaker = false) {
     FILE* out = std::fopen(path.c_str(), "wb");
     if (!out) return false;
 
-    write_segments_json(out, segments);
+    write_segments_json(out, segments, no_speaker);
     std::fclose(out);
     return true;
 }
@@ -324,6 +332,7 @@ static void print_usage(const char* program) {
     fprintf(stderr, "  --realtime              Pace audio at 1x real-time speed (for profiling)\n");
     fprintf(stderr, "  --stats                 Print memory and CPU usage statistics\n");
     fprintf(stderr, "  --offline               Run Whisper on full audio + offline diarization (non-streaming)\n");
+    fprintf(stderr, "  --no-diarize            Transcription-only mode (no speaker labels)\n");
     fprintf(stderr, "  --help                  Print this help message\n");
 }
 
@@ -351,6 +360,7 @@ int main(int argc, char** argv) {
     bool realtime = false;
     bool stats = false;
     bool offline = false;
+    bool no_diarize = false;
     std::string output_path;
 
     int i = 1;
@@ -386,6 +396,8 @@ int main(int argc, char** argv) {
             realtime = true;
         } else if (arg == "--offline") {
             offline = true;
+        } else if (arg == "--no-diarize") {
+            no_diarize = true;
         } else if (arg == "--stats") {
             stats = true;
         } else if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
@@ -409,10 +421,27 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Error: input must be a .wav file\n");
         return 1;
     }
-    if (!seg_model || !emb_model || !whisper_model || !plda_model) {
-        fprintf(stderr, "Error: --seg-model, --emb-model, --whisper-model, and --plda are required\n\n");
-        print_usage(argv[0]);
+    if (no_diarize && offline) {
+        fprintf(stderr, "Error: --no-diarize is not supported with --offline mode\n");
         return 1;
+    }
+    if (no_diarize) {
+        if (!seg_model || !whisper_model) {
+            fprintf(stderr, "Error: --seg-model and --whisper-model are required (--no-diarize mode)\n\n");
+            print_usage(argv[0]);
+            return 1;
+        }
+    } else {
+        if (!seg_model || !emb_model || !whisper_model || !plda_model) {
+            fprintf(stderr, "Error: --seg-model, --emb-model, --whisper-model, and --plda are required\n\n");
+            print_usage(argv[0]);
+            return 1;
+        }
+    }
+
+    if (no_diarize && rttm_path) {
+        fprintf(stderr, "Warning: --rttm ignored in --no-diarize mode (RTTM requires speaker labels)\n");
+        rttm_path = nullptr;
     }
 
 
@@ -476,8 +505,10 @@ int main(int argc, char** argv) {
         std::string output_path;
         std::string rttm_path;
         std::string file_id;
+        bool no_diarize = false;
     } callback_ctx;
     callback_ctx.output_path = output_path;
+    callback_ctx.no_diarize = no_diarize;
     if (rttm_path) {
         callback_ctx.rttm_path = rttm_path;
         callback_ctx.file_id = audio_file_id_from_path(audio_path);
@@ -488,7 +519,7 @@ int main(int argc, char** argv) {
         ctx->segments = segments;
 
         if (!ctx->output_path.empty()) {
-            if (!write_segments_json_file(ctx->output_path, ctx->segments)) {
+            if (!write_segments_json_file(ctx->output_path, ctx->segments, ctx->no_diarize)) {
                 fprintf(stderr, "Error: could not write incremental output file '%s'\n", ctx->output_path.c_str());
             }
         }
@@ -502,8 +533,12 @@ int main(int argc, char** argv) {
 
     PipelineConfig config{};
     config.diarization.seg_model_path = seg_model;
-    config.diarization.emb_model_path = emb_model;
-    config.diarization.plda_path = plda_model;
+    if (emb_model) {
+        config.diarization.emb_model_path = emb_model;
+    }
+    if (plda_model) {
+        config.diarization.plda_path = plda_model;
+    }
     if (seg_coreml) {
         config.diarization.seg_coreml_path = seg_coreml;
     }
@@ -514,6 +549,7 @@ int main(int argc, char** argv) {
     config.transcriber.n_threads = 4;
     config.transcriber.language = language;
     config.vad_model_path = vad_model;
+    config.transcription_only = no_diarize;
 
     const auto t0 = std::chrono::steady_clock::now();
 
@@ -612,6 +648,10 @@ int main(int argc, char** argv) {
 
     pipeline_finalize(state);
 
+    // Save accumulated segments before freeing state (incremental callbacks only capture last batch)
+    const auto& all = pipeline_get_all_segments(state);
+    callback_ctx.segments.assign(all.begin(), all.end());
+
     const auto t1 = std::chrono::steady_clock::now();
     pipeline_free(state);
 
@@ -623,9 +663,9 @@ int main(int argc, char** argv) {
     }
 
     if (output_path.empty()) {
-        write_segments_json(stdout, callback_ctx.segments);
+        write_segments_json(stdout, callback_ctx.segments, no_diarize);
     } else {
-        if (!write_segments_json_file(output_path, callback_ctx.segments)) {
+        if (!write_segments_json_file(output_path, callback_ctx.segments, no_diarize)) {
             fprintf(stderr, "Error: could not open output file '%s'\n", output_path.c_str());
             return 1;
         }

@@ -4,7 +4,6 @@
 #include "silence_filter.h"
 
 #include <cstdint>
-#include <cstdio>
 #include <vector>
 
 OfflinePipelineResult offline_transcribe(
@@ -156,6 +155,20 @@ OfflinePipelineResult offline_transcribe(
     // Done with Whisper — free before heavy diarization work
     whisper_free(ctx);
     ctx = nullptr;
+
+    if (config.transcription_only) {
+        for (auto& ts : transcribe_segments) {
+            AlignedSegment as;
+            as.speaker = "";
+            as.start = ts.start;
+            as.duration = ts.end - ts.start;
+            as.text = std::move(ts.text);
+            out.segments.push_back(std::move(as));
+        }
+        out.valid = true;
+        fprintf(stderr, "Offline pipeline: transcription-only — %zu segments (no diarization)\n", out.segments.size());
+        return out;
+    }
 
     // ================================================================
     // Step 4: Run offline diarization
@@ -365,6 +378,21 @@ OfflinePipelineResult offline_transcribe_with_cache(
 
     fprintf(stderr, "Offline pipeline (cached): %zu Whisper segments extracted\n",
             transcribe_segments.size());
+
+    if (config.transcription_only) {
+        for (auto& ts : transcribe_segments) {
+            AlignedSegment as;
+            as.speaker = "";
+            as.start = ts.start;
+            as.duration = ts.end - ts.start;
+            as.text = std::move(ts.text);
+            out.segments.push_back(std::move(as));
+        }
+        out.filtered_audio = std::move(filtered_audio);
+        out.valid = true;
+        fprintf(stderr, "Offline pipeline (cached): transcription-only — %zu segments (no diarization)\n", out.segments.size());
+        return out;
+    }
 
     // ================================================================
     // Step 3: Run offline diarization (using cached models)

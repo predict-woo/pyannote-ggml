@@ -42,6 +42,8 @@ PipelineModel::PipelineModel(const Napi::CallbackInfo& info)
     }
 
     Napi::Object config = info[0].As<Napi::Object>();
+    transcription_only_ = config.Has("transcriptionOnly") && config.Get("transcriptionOnly").IsBoolean()
+        ? config.Get("transcriptionOnly").As<Napi::Boolean>().Value() : false;
 
     auto getStringProp = [&](const char* name) -> std::string {
         if (!config.Has(name) || !config.Get(name).IsString()) {
@@ -69,12 +71,18 @@ PipelineModel::PipelineModel(const Napi::CallbackInfo& info)
 
     seg_model_path_ = getStringProp("segModelPath");
     if (env.IsExceptionPending()) return;
-    emb_model_path_ = getStringProp("embModelPath");
-    if (env.IsExceptionPending()) return;
-    plda_path_ = getStringProp("pldaPath");
-    if (env.IsExceptionPending()) return;
-    coreml_path_ = getStringProp("coremlPath");
-    if (env.IsExceptionPending()) return;
+    if (transcription_only_) {
+        emb_model_path_ = getOptionalStringProp("embModelPath");
+        plda_path_ = getOptionalStringProp("pldaPath");
+        coreml_path_ = getOptionalStringProp("coremlPath");
+    } else {
+        emb_model_path_ = getStringProp("embModelPath");
+        if (env.IsExceptionPending()) return;
+        plda_path_ = getStringProp("pldaPath");
+        if (env.IsExceptionPending()) return;
+        coreml_path_ = getStringProp("coremlPath");
+        if (env.IsExceptionPending()) return;
+    }
     seg_coreml_path_ = getStringProp("segCoremlPath");
     if (env.IsExceptionPending()) return;
     whisper_model_path_ = getStringProp("whisperModelPath");
@@ -171,6 +179,7 @@ PipelineConfig PipelineModel::BuildConfig() const {
     config.transcriber.no_context = no_context_;
     config.transcriber.suppress_blank = suppress_blank_;
     config.transcriber.suppress_nst = suppress_nst_;
+    config.transcription_only = transcription_only_;
 
     config.vad_model_path = vad_model_path_.empty() ? nullptr : vad_model_path_.c_str();
     return config;

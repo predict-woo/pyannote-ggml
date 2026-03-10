@@ -2,12 +2,12 @@ export interface ModelConfig {
   // === Required Model Paths ===
   /** Path to segmentation GGUF model */
   segModelPath: string;
-  /** Path to embedding GGUF model */
-  embModelPath: string;
-  /** Path to PLDA GGUF model */
-  pldaPath: string;
-  /** Path to embedding CoreML .mlpackage directory */
-  coremlPath: string;
+  /** Path to embedding GGUF model (required unless transcriptionOnly is true) */
+  embModelPath?: string;
+  /** Path to PLDA GGUF model (required unless transcriptionOnly is true) */
+  pldaPath?: string;
+  /** Path to embedding CoreML .mlpackage directory (required unless transcriptionOnly is true) */
+  coremlPath?: string;
   /** Path to segmentation CoreML .mlpackage directory */
   segCoremlPath: string;
   /** Path to Whisper GGUF model */
@@ -16,6 +16,9 @@ export interface ModelConfig {
   // === Optional Model Paths ===
   /** Path to Silero VAD model (optional, enables silence compression) */
   vadModelPath?: string;
+  /** Transcription-only mode - skip speaker diarization (default: false).
+   * When true, embModelPath, pldaPath, and coremlPath (embedding CoreML) are not required. */
+  transcriptionOnly?: boolean;
 
   // === Whisper Context Options (model loading) ===
   /** Enable GPU acceleration (default: true) */

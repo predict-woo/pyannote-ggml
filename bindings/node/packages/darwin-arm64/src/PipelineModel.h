@@ -40,6 +40,7 @@ private:
     std::string seg_coreml_path_;
     std::string whisper_model_path_;
     std::string vad_model_path_;
+    bool transcription_only_ = false;
     std::string language_;
     int n_threads_ = 4;
 

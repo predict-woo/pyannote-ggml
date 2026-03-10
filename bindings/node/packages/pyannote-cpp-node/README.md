@@ -3,19 +3,19 @@
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
-Node.js native bindings for integrated Whisper transcription + speaker diarization with speaker-labeled segment output.
+Node.js native bindings for Whisper transcription with optional speaker diarization.
 
 ## Overview
 
-`pyannote-cpp-node` exposes the integrated C++ pipeline that combines Whisper transcription and speaker diarization into a single API.
+`pyannote-cpp-node` exposes the integrated C++ pipeline that combines Whisper transcription and optional speaker diarization into a single API (`transcriptionOnly: true` skips diarization).
 
-Given 16 kHz mono PCM audio (`Float32Array`), it produces cumulative and final transcript segments shaped as:
+Given 16 kHz mono PCM audio (`Float32Array`), it produces transcript segments shaped as below. In streaming mode, diarization emits cumulative `segments` events, while `transcriptionOnly: true` emits incremental `segments` events. `finalize()` returns all segments in both modes.
 
-- speaker label (`SPEAKER_00`, `SPEAKER_01`, ...)
+- speaker label (`SPEAKER_00`, `SPEAKER_01`, ...), or empty string (`""`) when `transcriptionOnly` is `true`
 - segment start/duration in seconds
 - segment text
 
-The API supports three modes: **offline** batch processing (`transcribeOffline`), **one-shot** streaming (`transcribe`), and **incremental** streaming (`createSession` + `push`/`finalize`). All heavy operations are asynchronous and run on libuv worker threads.
+The API supports three modes: **offline** batch processing (`transcribeOffline`), **one-shot** streaming (`transcribe`), and **incremental** streaming (`createSession` + `push`/`finalize`). All three modes support transcription-only operation via `transcriptionOnly: true`. All heavy operations are asynchronous and run on libuv worker threads.
 
 ## Features
 
@@ -24,6 +24,7 @@ The API supports three modes: **offline** batch processing (`transcribeOffline`)
 - **Offline mode**: runs Whisper on the full audio at once + offline diarization (fastest for batch)
 - **One-shot mode**: streaming pipeline with automatic chunking
 - **Streaming mode**: incremental push/finalize with real-time `segments` events and `audio` chunk streaming
+- **Transcription-only mode**: skip speaker diarization entirely, only segmentation, VAD, and Whisper models required
 - Deterministic output for the same audio/models/config
 - CoreML-accelerated inference on macOS
 - **Shared model cache**: all models loaded once during `Pipeline.load()`, reused across offline/streaming/session modes
@@ -38,9 +39,9 @@ The API supports three modes: **offline** batch processing (`transcribeOffline`)
 - Node.js >= 18
 - Model files:
   - Segmentation GGUF (`segModelPath`)
-  - Embedding GGUF (`embModelPath`)
-  - PLDA GGUF (`pldaPath`)
-  - Embedding CoreML `.mlpackage` (`coremlPath`)
+  - Embedding GGUF (`embModelPath`, required unless `transcriptionOnly` is `true`)
+  - PLDA GGUF (`pldaPath`, required unless `transcriptionOnly` is `true`)
+  - Embedding CoreML `.mlpackage` (`coremlPath`, required unless `transcriptionOnly` is `true`)
   - Segmentation CoreML `.mlpackage` (`segCoremlPath`)
   - Whisper GGUF (`whisperModelPath`)
   - Optional Silero VAD model (`vadModelPath`)
@@ -87,6 +88,29 @@ for (const segment of result.segments) {
 pipeline.close();
 ```
 
+### Transcription-only mode
+
+```typescript
+// Transcription-only - no speaker diarization, fewer model paths needed
+const pipeline = await Pipeline.load({
+  segModelPath: './models/segmentation.gguf',
+  segCoremlPath: './models/segmentation.mlpackage',
+  whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
+  language: 'en',
+  transcriptionOnly: true,
+});
+
+const result = await pipeline.transcribe(audio);
+
+for (const segment of result.segments) {
+  const end = segment.start + segment.duration;
+  // No speaker label - segment.speaker is empty string
+  console.log(`${segment.start.toFixed(2)}-${end.toFixed(2)} ${segment.text.trim()}`);
+}
+
+pipeline.close();
+```
+
 ## API Reference
 
 ### `Pipeline`
@@ -107,11 +131,11 @@ class Pipeline {
 
 #### `static async load(config: ModelConfig): Promise<Pipeline>`
 
-Validates model paths and loads all models (Whisper, CoreML segmentation/embedding, PLDA, and optionally VAD) into a shared cache on a background thread. Models are loaded once and reused across all subsequent `transcribe()`, `transcribeOffline()`, and `createSession()` calls — no redundant loading occurs when switching between modes. Models are freed only when `close()` is called.
+Validates model paths and loads all models (Whisper, CoreML segmentation/embedding, PLDA, and optionally VAD) into a shared cache on a background thread. When `transcriptionOnly` is `true`, embedding, PLDA, and embedding CoreML models are not loaded. Models are loaded once and reused across all subsequent `transcribe()`, `transcribeOffline()`, and `createSession()` calls — no redundant loading occurs when switching between modes. Models are freed only when `close()` is called.
 
 #### `async transcribeOffline(audio: Float32Array, onProgress?, onSegment?): Promise<TranscriptionResult>`
 
-Runs Whisper on the **entire** audio buffer in a single `whisper_full()` call, then runs offline diarization and WhisperX-style speaker alignment. This is the fastest mode for batch processing — no streaming infrastructure is involved.
+Runs Whisper on the **entire** audio buffer in a single `whisper_full()` call, then runs offline diarization and WhisperX-style speaker alignment. In transcription-only mode, diarization and speaker alignment are skipped, and segments have an empty `speaker` field. This is the fastest mode for batch processing — no streaming infrastructure is involved.
 
 The optional `onProgress` callback receives `(phase, progress)` updates:
 
@@ -153,7 +177,7 @@ const result = await pipeline.transcribeOffline(
 
 #### `async transcribe(audio: Float32Array): Promise<TranscriptionResult>`
 
-Runs one-shot transcription + diarization using the streaming pipeline internally (pushes 1-second chunks then finalizes).
+Runs one-shot transcription (+ diarization unless `transcriptionOnly` is set) using the streaming pipeline internally (pushes 1-second chunks then finalizes).
 
 #### `setLanguage(language: string): void`
 
@@ -242,7 +266,7 @@ Updates one or more Whisper decode options on the live streaming session. Takes 
 
 #### `async finalize(): Promise<TranscriptionResult>`
 
-Flushes all stages, runs final recluster + alignment, and returns the definitive result.
+Flushes all stages, runs final recluster + alignment, and returns the definitive result. `finalize()` always returns all accumulated segments regardless of mode. In diarization mode this is the final re-aligned output, and in transcription-only mode this is the union of all incremental `segments` emissions.
 
 ```typescript
 type TranscriptionResult = {
@@ -262,11 +286,30 @@ Returns `true` after `close()`.
 
 #### Event: `'segments'`
 
-Emitted after each Whisper transcription result with the latest cumulative aligned output.
+Emitted after each Whisper transcription result. Behavior depends on mode:
+
+- With diarization (default): each emission contains all segments re-aligned against the latest speaker clustering. Earlier segments may get updated speaker labels as more data arrives. The final emission after `finalize()` is the definitive output.
+- With `transcriptionOnly: true`: each emission contains only the new segments from the latest Whisper result. Earlier segments never change, so incremental delivery is safe. Accumulate across emissions to build the full transcript.
 
 ```typescript
+// With diarization (default): cumulative, re-aligned output
 session.on('segments', (segments: AlignedSegment[]) => {
-  // `segments` contains the latest cumulative speaker-labeled transcript
+  // `segments` contains the latest full speaker-labeled transcript so far
+  const latest = segments[segments.length - 1];
+  if (latest) {
+    const end = latest.start + latest.duration;
+    console.log(`[${latest.speaker}] ${latest.start.toFixed(2)}-${end.toFixed(2)} ${latest.text.trim()}`);
+  }
+});
+
+// With transcriptionOnly: incremental output, accumulate manually
+const allSegments: AlignedSegment[] = [];
+session.on('segments', (newSegments: AlignedSegment[]) => {
+  allSegments.push(...newSegments);
+  for (const seg of newSegments) {
+    const end = seg.start + seg.duration;
+    console.log(`${seg.start.toFixed(2)}-${end.toFixed(2)} ${seg.text.trim()}`);
+  }
 });
 ```
 
@@ -288,14 +331,14 @@ export interface ModelConfig {
   /** Path to segmentation GGUF model */
   segModelPath: string;
 
-  /** Path to embedding GGUF model */
-  embModelPath: string;
+  /** Path to embedding GGUF model (required unless transcriptionOnly is true) */
+  embModelPath?: string;
 
-  /** Path to PLDA GGUF model */
-  pldaPath: string;
+  /** Path to PLDA GGUF model (required unless transcriptionOnly is true) */
+  pldaPath?: string;
 
-  /** Path to embedding CoreML .mlpackage directory */
-  coremlPath: string;
+  /** Path to embedding CoreML .mlpackage directory (required unless transcriptionOnly is true) */
+  coremlPath?: string;
 
   /** Path to segmentation CoreML .mlpackage directory */
   segCoremlPath: string;
@@ -306,6 +349,12 @@ export interface ModelConfig {
   // === Optional Model Paths ===
   /** Path to Silero VAD model (optional, enables silence compression) */
   vadModelPath?: string;
+
+  /**
+   * Transcription-only mode - skip speaker diarization (default: false).
+   * When true, embModelPath, pldaPath, and coremlPath are not required.
+   */
+  transcriptionOnly?: boolean;
 
   // === Whisper Context Options (model loading) ===
   /** Enable GPU acceleration (default: true) */
@@ -416,7 +465,7 @@ export interface DecodeOptions {
 }
 
 export interface AlignedSegment {
-  /** Global speaker label (e.g., SPEAKER_00). */
+  /** Global speaker label (e.g., SPEAKER_00). Empty string when transcriptionOnly is true. */
   speaker: string;
 
   /** Segment start time in seconds. */
@@ -430,7 +479,7 @@ export interface AlignedSegment {
 }
 
 export interface TranscriptionResult {
-  /** Full speaker-labeled transcript segments. */
+  /** Transcript segments. Speaker-labeled when diarization is enabled; speaker is empty string in transcription-only mode. */
   segments: AlignedSegment[];
   /**
    * Silence-filtered audio (16 kHz mono Float32Array).
@@ -586,6 +635,7 @@ async function runStreaming(audio: Float32Array) {
   });
 
   const session = pipeline.createSession();
+  // Diarization mode (default): each event is cumulative and may relabel earlier segments
   session.on('segments', (segments) => {
     const latest = segments[segments.length - 1];
     if (latest) {
@@ -610,6 +660,44 @@ async function runStreaming(audio: Float32Array) {
 
   const finalResult = await session.finalize();
   console.log(`Final segments: ${finalResult.segments.length}`);
+
+  session.close();
+  pipeline.close();
+}
+```
+
+```typescript
+import { Pipeline, type AlignedSegment } from 'pyannote-cpp-node';
+
+async function runStreamingTranscriptionOnly(audio: Float32Array) {
+  const pipeline = await Pipeline.load({
+    segModelPath: './models/segmentation.gguf',
+    segCoremlPath: './models/segmentation.mlpackage',
+    whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
+    transcriptionOnly: true,
+  });
+
+  const session = pipeline.createSession();
+
+  // Transcription-only: each event has only NEW segments
+  const allSegments: AlignedSegment[] = [];
+  session.on('segments', (newSegments) => {
+    allSegments.push(...newSegments);
+    for (const seg of newSegments) {
+      const end = seg.start + seg.duration;
+      console.log(`${seg.start.toFixed(2)}-${end.toFixed(2)} ${seg.text.trim()}`);
+    }
+  });
+
+  const chunkSize = 16000;
+  for (let i = 0; i < audio.length; i += chunkSize) {
+    const chunk = audio.slice(i, Math.min(i + chunkSize, audio.length));
+    await session.push(chunk);
+  }
+
+  const finalResult = await session.finalize();
+  console.log(`Final segments from finalize(): ${finalResult.segments.length}`);
+  console.log(`Accumulated from incremental events: ${allSegments.length}`);
 
   session.close();
   pipeline.close();
@@ -756,6 +844,21 @@ The pipeline returns this JSON shape:
 }
 ```
 
+When `transcriptionOnly` is `true`, the `speaker` field is an empty string:
+
+```json
+{
+  "segments": [
+    {
+      "speaker": "",
+      "start": 0.497000,
+      "duration": 2.085000,
+      "text": "Hello world"
+    }
+  ]
+}
+```
+
 ## Audio Format Requirements
 
 - Input must be `Float32Array`
@@ -775,6 +878,8 @@ All API methods expect decoded PCM samples; file decoding/resampling is handled 
 4. WhisperX-style alignment (speaker assignment by maximum segment overlap)
 5. Return segments + filtered audio bytes (timestamps aligned to filtered audio)
 
+In transcription-only mode, steps 3 (diarization) and 4 (alignment) are skipped.
+
 ### Streaming mode (`transcribe` / `createSession`)
 
 The streaming pipeline runs in 7 stages:
@@ -786,6 +891,8 @@ The streaming pipeline runs in 7 stages:
 5. Alignment (segment-level speaker assignment by overlap)
 6. Finalize (flush + final recluster + final alignment)
 7. Callback/event emission (`segments` updates + `audio` chunk streaming)
+
+In transcription-only mode, steps 5 (alignment) and 6 (recluster) are skipped, and segments are emitted with an empty `speaker` field. Each `segments` event contains only the new segments from that Whisper call (incremental), unlike diarization mode which re-emits all segments after each recluster (cumulative).
 
 ## Performance
 

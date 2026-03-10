@@ -42,6 +42,9 @@ void TranscribeWorker::Execute() {
     }
 
     pipeline_finalize(state);
+    // Save accumulated segments before freeing state (incremental callbacks only capture last batch)
+    const auto& all = pipeline_get_all_segments(state);
+    cb_data_.segments.assign(all.begin(), all.end());
     pipeline_free(state);
 }
 

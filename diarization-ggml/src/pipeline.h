@@ -10,6 +10,7 @@ struct PipelineConfig {
     StreamingConfig diarization;
     TranscriberConfig transcriber;
     const char* vad_model_path;  // Silero VAD model for silence filter (nullptr = fallback)
+    bool transcription_only = false;
 };
 
 typedef void (*pipeline_callback)(const std::vector<AlignedSegment>& segments,
@@ -37,3 +38,4 @@ std::vector<bool> pipeline_push(PipelineState* state, const float* samples, int 
 void pipeline_finalize(PipelineState* state);
 void pipeline_free(PipelineState* state);
 void pipeline_set_decode_options(PipelineState* state, const DecodeOptions& opts);
+const std::vector<AlignedSegment>& pipeline_get_all_segments(PipelineState* state);
