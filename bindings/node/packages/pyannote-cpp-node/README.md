@@ -3,19 +3,19 @@
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
-Node.js native bindings for integrated Whisper transcription + speaker diarization with speaker-labeled segment output.
+Node.js native bindings for Whisper transcription with optional speaker diarization.
 
 ## Overview
 
-`pyannote-cpp-node` exposes the integrated C++ pipeline that combines Whisper transcription and speaker diarization into a single API.
+`pyannote-cpp-node` exposes the integrated C++ pipeline that combines Whisper transcription and optional speaker diarization into a single API (`transcriptionOnly: true` skips diarization).
 
 Given 16 kHz mono PCM audio (`Float32Array`), it produces cumulative and final transcript segments shaped as:
 
-- speaker label (`SPEAKER_00`, `SPEAKER_01`, ...)
+- speaker label (`SPEAKER_00`, `SPEAKER_01`, ...), or empty string (`""`) when `transcriptionOnly` is `true`
 - segment start/duration in seconds
 - segment text
 
-The API supports three modes: **offline** batch processing (`transcribeOffline`), **one-shot** streaming (`transcribe`), and **incremental** streaming (`createSession` + `push`/`finalize`). All heavy operations are asynchronous and run on libuv worker threads.
+The API supports three modes: **offline** batch processing (`transcribeOffline`), **one-shot** streaming (`transcribe`), and **incremental** streaming (`createSession` + `push`/`finalize`). All three modes support transcription-only operation via `transcriptionOnly: true`. All heavy operations are asynchronous and run on libuv worker threads.
 
 ## Features
 
@@ -24,6 +24,7 @@ The API supports three modes: **offline** batch processing (`transcribeOffline`)
 - **Offline mode**: runs Whisper on the full audio at once + offline diarization (fastest for batch)
 - **One-shot mode**: streaming pipeline with automatic chunking
 - **Streaming mode**: incremental push/finalize with real-time `segments` events and `audio` chunk streaming
+- **Transcription-only mode**: skip speaker diarization entirely, only segmentation, VAD, and Whisper models required
 - Deterministic output for the same audio/models/config
 - CoreML-accelerated inference on macOS
 - **Shared model cache**: all models loaded once during `Pipeline.load()`, reused across offline/streaming/session modes
@@ -130,11 +131,11 @@ class Pipeline {
 
 #### `static async load(config: ModelConfig): Promise<Pipeline>`
 
-Validates model paths and loads all models (Whisper, CoreML segmentation/embedding, PLDA, and optionally VAD) into a shared cache on a background thread. Models are loaded once and reused across all subsequent `transcribe()`, `transcribeOffline()`, and `createSession()` calls — no redundant loading occurs when switching between modes. Models are freed only when `close()` is called.
+Validates model paths and loads all models (Whisper, CoreML segmentation/embedding, PLDA, and optionally VAD) into a shared cache on a background thread. When `transcriptionOnly` is `true`, embedding, PLDA, and embedding CoreML models are not loaded. Models are loaded once and reused across all subsequent `transcribe()`, `transcribeOffline()`, and `createSession()` calls — no redundant loading occurs when switching between modes. Models are freed only when `close()` is called.
 
 #### `async transcribeOffline(audio: Float32Array, onProgress?, onSegment?): Promise<TranscriptionResult>`
 
-Runs Whisper on the **entire** audio buffer in a single `whisper_full()` call, then runs offline diarization and WhisperX-style speaker alignment. This is the fastest mode for batch processing — no streaming infrastructure is involved.
+Runs Whisper on the **entire** audio buffer in a single `whisper_full()` call, then runs offline diarization and WhisperX-style speaker alignment. In transcription-only mode, diarization and speaker alignment are skipped, and segments have an empty `speaker` field. This is the fastest mode for batch processing — no streaming infrastructure is involved.
 
 The optional `onProgress` callback receives `(phase, progress)` updates:
 
@@ -176,7 +177,7 @@ const result = await pipeline.transcribeOffline(
 
 #### `async transcribe(audio: Float32Array): Promise<TranscriptionResult>`
 
-Runs one-shot transcription + diarization using the streaming pipeline internally (pushes 1-second chunks then finalizes).
+Runs one-shot transcription (+ diarization unless `transcriptionOnly` is set) using the streaming pipeline internally (pushes 1-second chunks then finalizes).
 
 #### `setLanguage(language: string): void`
 
@@ -445,7 +446,7 @@ export interface DecodeOptions {
 }
 
 export interface AlignedSegment {
-  /** Global speaker label (e.g., SPEAKER_00). */
+  /** Global speaker label (e.g., SPEAKER_00). Empty string when transcriptionOnly is true. */
   speaker: string;
 
   /** Segment start time in seconds. */
@@ -459,7 +460,7 @@ export interface AlignedSegment {
 }
 
 export interface TranscriptionResult {
-  /** Full speaker-labeled transcript segments. */
+  /** Transcript segments. Speaker-labeled when diarization is enabled; speaker is empty string in transcription-only mode. */
   segments: AlignedSegment[];
   /**
    * Silence-filtered audio (16 kHz mono Float32Array).
@@ -785,6 +786,21 @@ The pipeline returns this JSON shape:
 }
 ```
 
+When `transcriptionOnly` is `true`, the `speaker` field is an empty string:
+
+```json
+{
+  "segments": [
+    {
+      "speaker": "",
+      "start": 0.497000,
+      "duration": 2.085000,
+      "text": "Hello world"
+    }
+  ]
+}
+```
+
 ## Audio Format Requirements
 
 - Input must be `Float32Array`
@@ -804,6 +820,8 @@ All API methods expect decoded PCM samples; file decoding/resampling is handled 
 4. WhisperX-style alignment (speaker assignment by maximum segment overlap)
 5. Return segments + filtered audio bytes (timestamps aligned to filtered audio)
 
+In transcription-only mode, steps 3 (diarization) and 4 (alignment) are skipped.
+
 ### Streaming mode (`transcribe` / `createSession`)
 
 The streaming pipeline runs in 7 stages:
@@ -815,6 +833,8 @@ The streaming pipeline runs in 7 stages:
 5. Alignment (segment-level speaker assignment by overlap)
 6. Finalize (flush + final recluster + final alignment)
 7. Callback/event emission (`segments` updates + `audio` chunk streaming)
+
+In transcription-only mode, steps 5 (alignment) and 6 (recluster) are skipped, and segments are emitted with an empty `speaker` field.
 
 ## Performance
 
