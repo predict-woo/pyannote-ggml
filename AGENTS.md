@@ -171,6 +171,15 @@ with open('/tmp/py_reference.rttm', 'w') as f:
 "
 ```
 
+### Test 3: Node Bindings (Vitest)
+```bash
+cd bindings/node
+pnpm test -- --no-file-parallelism
+```
+**CRITICAL: Always use `--no-file-parallelism`.** Running test files in parallel causes crashes due to multiple CoreML/Metal contexts competing for GPU resources on the same machine. This flag runs test files sequentially while still allowing individual tests within a file to run concurrently.
+
+Must pass: 8 test files, 64 tests. If tests fail with stale behavior (code changes have no effect), run `./rebuild.sh` first — the `.node` binary in `node_modules` is a copy, not a symlink.
+
 ## Key Technical Decisions
 
 ### Numerical Precision

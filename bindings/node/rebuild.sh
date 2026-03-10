@@ -28,6 +28,7 @@ STALE="$NODE_MODULES_ADDON/build/Release/pyannote-addon.node"
 
 if [ -f "$FRESH" ]; then
     mkdir -p "$(dirname "$STALE")"
+    rm -f "$STALE"
     cp "$FRESH" "$STALE"
     echo "Copied: $(stat -f '%z bytes' "$FRESH")"
     echo "  From: $FRESH"
