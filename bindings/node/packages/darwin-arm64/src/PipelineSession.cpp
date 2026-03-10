@@ -140,6 +140,7 @@ PipelineSession::PipelineSession(const Napi::CallbackInfo& info)
     config.transcriber.no_context = no_context_;
     config.transcriber.suppress_blank = suppress_blank_;
     config.transcriber.suppress_nst = suppress_nst_;
+    config.transcription_only = srcConfig.transcription_only;
 
     if (cache_) {
         state_ = pipeline_init_with_cache(config, cache_, pipeline_cb, audio_cb, this);

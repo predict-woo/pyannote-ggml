@@ -25,6 +25,7 @@ OfflineTranscribeWorker::OfflineTranscribeWorker(Napi::Env env,
     config_.coreml_path     = pc.diarization.coreml_path;
     config_.seg_coreml_path = pc.diarization.seg_coreml_path;
     config_.transcriber     = pc.transcriber;
+    config_.transcription_only = pc.transcription_only;
 
     // Store progress callback reference (if provided)
     if (!progress_callback.IsEmpty() && progress_callback.IsFunction()) {

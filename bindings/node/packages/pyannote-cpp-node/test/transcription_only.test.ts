@@ -321,6 +321,9 @@ describe('Streaming session', () => {
       const finalResult = await session.finalize();
       expect(finalResult.segments.length).toBeGreaterThan(0);
 
+      // Allow event loop to process TSFN callback for segments event
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       const observedSegments = received.flat();
       expect(observedSegments.length).toBeGreaterThan(0);
       for (const seg of observedSegments) {
