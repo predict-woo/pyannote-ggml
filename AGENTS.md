@@ -113,6 +113,21 @@ cd models/segmentation-ggml && ../../.venv/bin/python3 convert_coreml.py
 cd models/embedding-ggml && ../../.venv/bin/python3 convert_coreml.py
 ```
 
+### Node Bindings Rebuild (CRITICAL)
+
+**After ANY C++ change that affects the Node addon, run the rebuild script:**
+```bash
+cd bindings/node
+./rebuild.sh
+```
+
+This script does three things that are ALL required:
+1. Rebuilds `diarization-ggml/build/` and `diarization-ggml/build-static/` (the Node addon links against `build-static/`, NOT `build/`)
+2. Cleans and rebuilds the native addon via cmake-js in `packages/darwin-arm64/`
+3. **Copies the fresh `.node` binary into `node_modules/`** — this is the step that `pnpm install` does NOT do reliably
+
+**Why this matters:** pnpm copies (not symlinks) the `.node` addon into `node_modules/@pyannote-cpp-node/darwin-arm64/`. Vitest loads from `node_modules`, so without the copy step, tests run against a **stale binary** even after rebuilding. This has caused hours of debugging where code changes appeared to have no effect.
+
 ## Testing Protocol
 
 **CRITICAL: Run BOTH tests after ANY code change that could affect numerical output.**
@@ -381,6 +396,9 @@ The streaming code has no GGML-only fallback. Both segmentation and embedding `#
 
 ### 7. Audio buffer uses sliding window with offset tracking
 `audio_buffer` is NOT indexed by absolute position. `samples_trimmed` tracks how many samples were erased from the front. All buffer access uses `chunks_processed * STEP_SAMPLES - samples_trimmed` as the base offset. If you add code that reads from `audio_buffer`, you must account for this offset.
+
+### 8. Node addon binary in node_modules is a stale copy
+The `.node` addon at `node_modules/@pyannote-cpp-node/darwin-arm64/build/Release/pyannote-addon.node` is a **copy**, not a symlink. Rebuilding C++ code and even the addon itself does NOT update this copy. Vitest loads from `node_modules`, so tests silently run old code. **Always use `bindings/node/rebuild.sh`** which handles the copy step. Never manually run `cmake --build build-static` + `pnpm install` and assume the addon is updated.
 
 ## Performance Targets
 
