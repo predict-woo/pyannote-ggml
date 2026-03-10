@@ -38,9 +38,9 @@ The API supports three modes: **offline** batch processing (`transcribeOffline`)
 - Node.js >= 18
 - Model files:
   - Segmentation GGUF (`segModelPath`)
-  - Embedding GGUF (`embModelPath`)
-  - PLDA GGUF (`pldaPath`)
-  - Embedding CoreML `.mlpackage` (`coremlPath`)
+  - Embedding GGUF (`embModelPath`, required unless `transcriptionOnly` is `true`)
+  - PLDA GGUF (`pldaPath`, required unless `transcriptionOnly` is `true`)
+  - Embedding CoreML `.mlpackage` (`coremlPath`, required unless `transcriptionOnly` is `true`)
   - Segmentation CoreML `.mlpackage` (`segCoremlPath`)
   - Whisper GGUF (`whisperModelPath`)
   - Optional Silero VAD model (`vadModelPath`)
@@ -82,6 +82,29 @@ for (const segment of result.segments) {
   console.log(
     `[${segment.speaker}] ${segment.start.toFixed(2)}-${end.toFixed(2)} ${segment.text.trim()}`
   );
+}
+
+pipeline.close();
+```
+
+### Transcription-only mode
+
+```typescript
+// Transcription-only - no speaker diarization, fewer model paths needed
+const pipeline = await Pipeline.load({
+  segModelPath: './models/segmentation.gguf',
+  segCoremlPath: './models/segmentation.mlpackage',
+  whisperModelPath: './models/ggml-large-v3-turbo-q5_0.bin',
+  language: 'en',
+  transcriptionOnly: true,
+});
+
+const result = await pipeline.transcribe(audio);
+
+for (const segment of result.segments) {
+  const end = segment.start + segment.duration;
+  // No speaker label - segment.speaker is empty string
+  console.log(`${segment.start.toFixed(2)}-${end.toFixed(2)} ${segment.text.trim()}`);
 }
 
 pipeline.close();
@@ -288,14 +311,14 @@ export interface ModelConfig {
   /** Path to segmentation GGUF model */
   segModelPath: string;
 
-  /** Path to embedding GGUF model */
-  embModelPath: string;
+  /** Path to embedding GGUF model (required unless transcriptionOnly is true) */
+  embModelPath?: string;
 
-  /** Path to PLDA GGUF model */
-  pldaPath: string;
+  /** Path to PLDA GGUF model (required unless transcriptionOnly is true) */
+  pldaPath?: string;
 
-  /** Path to embedding CoreML .mlpackage directory */
-  coremlPath: string;
+  /** Path to embedding CoreML .mlpackage directory (required unless transcriptionOnly is true) */
+  coremlPath?: string;
 
   /** Path to segmentation CoreML .mlpackage directory */
   segCoremlPath: string;
@@ -306,6 +329,12 @@ export interface ModelConfig {
   // === Optional Model Paths ===
   /** Path to Silero VAD model (optional, enables silence compression) */
   vadModelPath?: string;
+
+  /**
+   * Transcription-only mode - skip speaker diarization (default: false).
+   * When true, embModelPath, pldaPath, and coremlPath are not required.
+   */
+  transcriptionOnly?: boolean;
 
   // === Whisper Context Options (model loading) ===
   /** Enable GPU acceleration (default: true) */

@@ -13,12 +13,17 @@ export class Pipeline {
   static async load(config: ModelConfig): Promise<Pipeline> {
     const requiredPaths = [
       config.segModelPath,
-      config.embModelPath,
-      config.pldaPath,
-      config.coremlPath,
       config.segCoremlPath,
       config.whisperModelPath,
     ];
+
+    if (!config.transcriptionOnly) {
+      if (!config.embModelPath) throw new Error('embModelPath is required when transcriptionOnly is not set');
+      if (!config.pldaPath) throw new Error('pldaPath is required when transcriptionOnly is not set');
+      if (!config.coremlPath) throw new Error('coremlPath is required when transcriptionOnly is not set');
+      requiredPaths.push(config.embModelPath, config.pldaPath, config.coremlPath);
+    }
+
     for (const path of requiredPaths) accessSync(path);
     if (config.vadModelPath) accessSync(config.vadModelPath);
 
