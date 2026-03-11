@@ -1,0 +1,24 @@
+{
+  "name": "@pyannote-cpp-node/win32-x64",
+  "version": "0.6.0",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "main": "./index.js",
+  "engines": { "node": ">=18" },
+  "files": [
+    "index.js",
+    "build/Release/pyannote-addon.node",
+    "build/Release/*.dll"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node ../../scripts/run-platform-build.js win32 x64 build",
+    "clean": "node ../../scripts/run-platform-build.js win32 x64 clean"
+  },
+  "devDependencies": {
+    "cmake-js": "^7.3.0",
+    "node-addon-api": "^8.3.0"
+  }
+}

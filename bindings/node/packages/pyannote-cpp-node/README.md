@@ -1,13 +1,26 @@
 # pyannote-cpp-node
 
-![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+![Platform](https://img.shields.io/badge/platform-macOS%20arm64%20%7C%20Windows%20x64-lightgrey)
 ![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
-Node.js native bindings for Whisper transcription with optional speaker diarization.
+Node.js native bindings for whisper.cpp transcription/VAD plus the pyannote speaker diarization pipeline.
 
 ## Overview
 
-`pyannote-cpp-node` exposes the integrated C++ pipeline that combines Whisper transcription and optional speaker diarization into a single API (`transcriptionOnly: true` skips diarization).
+`pyannote-cpp-node` is now the single package for both:
+
+- low-level whisper.cpp APIs: `WhisperContext`, `VadContext`, `transcribe`, `transcribeAsync`, `getGpuDevices`
+- high-level pyannote pipeline APIs: `Pipeline`, `PipelineSession`
+
+Platform support:
+
+- `darwin-arm64`: low-level whisper/VAD APIs and the full diarization pipeline
+- `win32-x64`: low-level whisper/VAD APIs only
+- unsupported: `darwin-x64`, `win32-ia32`
+
+`Pipeline` remains macOS Apple Silicon only. On Windows x64, `getCapabilities().pipeline` is `false` and pipeline calls throw an unsupported-platform error.
+
+The integrated pipeline combines Whisper transcription and optional speaker diarization into a single API (`transcriptionOnly: true` skips diarization).
 
 Given 16 kHz mono PCM audio (`Float32Array`), it produces transcript segments shaped as below. In streaming mode, diarization emits cumulative `segments` events, while `transcriptionOnly: true` emits incremental `segments` events. `finalize()` returns all segments in both modes.
 
@@ -19,6 +32,9 @@ The API supports three modes: **offline** batch processing (`transcribeOffline`)
 
 ## Features
 
+- Low-level whisper.cpp transcription API compatible with prior `whisper-cpp-node` usage
+- Built-in Silero VAD via `VadContext`
+- GPU device enumeration via `getGpuDevices()`
 - Integrated transcription + diarization in one pipeline
 - Speaker-labeled transcript segments with sentence-level text
 - **Offline mode**: runs Whisper on the full audio at once + offline diarization (fastest for batch)
@@ -35,8 +51,9 @@ The API supports three modes: **offline** batch processing (`transcribeOffline`)
 
 ## Requirements
 
-- macOS (Apple Silicon or Intel)
+- macOS Apple Silicon or Windows x64
 - Node.js >= 18
+- Pipeline support requires macOS Apple Silicon
 - Model files:
   - Segmentation GGUF (`segModelPath`)
   - Embedding GGUF (`embModelPath`, required unless `transcriptionOnly` is `true`)
@@ -57,6 +74,41 @@ pnpm add pyannote-cpp-node
 ```
 
 The package installs a platform-specific native addon through `optionalDependencies`.
+
+## Low-Level Quick Start
+
+```typescript
+import {
+  WhisperContext,
+  createVadContext,
+  getCapabilities,
+  transcribeAsync,
+} from 'pyannote-cpp-node';
+
+const capabilities = getCapabilities();
+console.log(capabilities);
+
+const ctx = new WhisperContext({
+  model: './models/ggml-base.en.bin',
+  use_gpu: true,
+  no_prints: true,
+});
+
+const result = await transcribeAsync(ctx, {
+  fname_inp: './audio.wav',
+  language: 'en',
+});
+
+const vad = createVadContext({
+  model: './models/ggml-silero-v6.2.0.bin',
+});
+
+console.log(result.segments);
+console.log(vad.getWindowSamples());
+
+vad.free();
+ctx.free();
+```
 
 ## Quick Start
 

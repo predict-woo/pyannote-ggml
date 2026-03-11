@@ -13,9 +13,8 @@
     "access": "public"
   },
   "scripts": {
-    "install": "cmake-js build",
-    "build": "cmake-js build",
-    "clean": "cmake-js clean"
+    "build": "node ../../scripts/run-platform-build.js darwin arm64 build",
+    "clean": "node ../../scripts/run-platform-build.js darwin arm64 clean"
   },
   "devDependencies": {
     "cmake-js": "^7.3.0",

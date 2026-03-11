@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { Pipeline } from '../src/index.js';
+import { hasRealPipelineAssets, pipelineSupported } from './real_assets.js';
+
+const describePipeline = describe.runIf(pipelineSupported && hasRealPipelineAssets());
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '../../../../..');
@@ -84,7 +87,7 @@ function writeWav(filePath: string, samples: Float32Array, sampleRate = 16000): 
 }
 
 
-describe('Audio passthrough without VAD', () => {
+describePipeline('Audio passthrough without VAD', () => {
   let pipeline: Pipeline;
   const input = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
 
@@ -156,7 +159,7 @@ describe('Audio passthrough without VAD', () => {
   }, 120000);
 });
 
-describe('Audio passthrough with VAD', () => {
+describePipeline('Audio passthrough with VAD', () => {
   let pipeline: Pipeline;
   const input = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
 

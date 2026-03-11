@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { Pipeline, type AlignedSegment } from '../src/index.js';
+import { hasRealPipelineAssets, pipelineSupported } from './real_assets.js';
+
+const describePipeline = describe.runIf(pipelineSupported && hasRealPipelineAssets());
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '../../../../..');
@@ -138,7 +141,7 @@ function assertTranscriptionOnlySegmentShape(segments: AlignedSegment[]): void {
   }
 }
 
-describe('Loading', () => {
+describePipeline('Loading', () => {
   it('loads without embedding/PLDA/coreml paths', async () => {
     const pipeline = await Pipeline.load(transcriptionOnlyConfig);
     expect(pipeline).toBeDefined();
@@ -180,7 +183,7 @@ describe('Loading', () => {
   });
 });
 
-describe('One-shot transcribe', () => {
+describePipeline('One-shot transcribe', () => {
   let pipeline: Pipeline;
   const audio = loadWav(AUDIO_PATH);
 
@@ -223,7 +226,7 @@ describe('One-shot transcribe', () => {
   });
 });
 
-describe('Offline transcribeOffline', () => {
+describePipeline('Offline transcribeOffline', () => {
   let pipeline: Pipeline;
   const audio = loadWav(AUDIO_PATH);
 
@@ -249,7 +252,7 @@ describe('Offline transcribeOffline', () => {
   });
 });
 
-describe('Streaming session', () => {
+describePipeline('Streaming session', () => {
   let pipeline: Pipeline;
   const audio = loadWav(AUDIO_PATH);
 
@@ -363,7 +366,7 @@ describe('Streaming session', () => {
   });
 });
 
-describe('Deterministic output', () => {
+describePipeline('Deterministic output', () => {
   let pipeline: Pipeline;
   const audio = loadWav(AUDIO_PATH);
 
@@ -389,7 +392,7 @@ describe('Deterministic output', () => {
   });
 });
 
-describe('E2E byte-identical JSON output vs C++ CLI', () => {
+describePipeline('E2E byte-identical JSON output vs C++ CLI', () => {
   it.skipIf(!existsSync(TRANSCRIBE_BIN))(
     'C++ transcribe --no-diarize and TS Pipeline streaming session produce identical JSON',
     async () => {
@@ -436,7 +439,7 @@ describe('E2E byte-identical JSON output vs C++ CLI', () => {
   );
 });
 
-describe('Resource cleanup', () => {
+describePipeline('Resource cleanup', () => {
   it('push after session close throws', async () => {
     const pipeline = await Pipeline.load(transcriptionOnlyConfig);
     const session = pipeline.createSession();

@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 
 import { Pipeline, type AlignedSegment } from '../src/index.js';
+import { hasRealPipelineAssets, pipelineSupported } from './real_assets.js';
+
+const describePipeline = describe.runIf(pipelineSupported && hasRealPipelineAssets());
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '../../../../..');
@@ -125,7 +128,7 @@ function firstDifference(a: string, b: string): string {
   return 'Strings are identical';
 }
 
-describe('E2E byte-identical JSON output', () => {
+describePipeline('E2E byte-identical JSON output', () => {
   it.skipIf(!existsSync(TRANSCRIBE_BIN))(
     'C++ transcribe binary and TS Pipeline streaming session produce identical JSON',
     async () => {

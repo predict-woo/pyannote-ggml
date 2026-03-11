@@ -25,19 +25,30 @@ add_definitions(-DNAPI_DISABLE_CPP_EXCEPTIONS)
 # bindings/node/packages/darwin-arm64/ → project root
 set(DIARIZATION_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../..")
 set(DIARIZATION_BUILD "${DIARIZATION_ROOT}/diarization-ggml/build-static")
+set(NODE_BINDINGS_ROOT "${DIARIZATION_ROOT}/bindings/node")
 
 # Source files
 file(GLOB ADDON_SOURCES "src/*.cpp")
+set(WHISPER_ADDON_SOURCES
+    ${NODE_BINDINGS_ROOT}/native/whisper/whisper_addon_wrapper.cpp
+    ${DIARIZATION_ROOT}/whisper.cpp/examples/common.cpp
+    ${DIARIZATION_ROOT}/whisper.cpp/examples/common-ggml.cpp
+    ${DIARIZATION_ROOT}/whisper.cpp/examples/common-whisper.cpp
+    ${DIARIZATION_ROOT}/whisper.cpp/examples/grammar-parser.cpp
+)
 
 # Create the addon shared library
-add_library(${PROJECT_NAME} SHARED ${ADDON_SOURCES} ${CMAKE_JS_SRC})
+add_library(${PROJECT_NAME} SHARED ${ADDON_SOURCES} ${WHISPER_ADDON_SOURCES} ${CMAKE_JS_SRC})
 
 # Include directories for diarization headers
 target_include_directories(${PROJECT_NAME} PRIVATE
+    ${NODE_BINDINGS_ROOT}/native/whisper
+    ${NODE_BINDINGS_ROOT}/native/pipeline
     ${DIARIZATION_ROOT}/diarization-ggml/include
     ${DIARIZATION_ROOT}/diarization-ggml/src
     ${DIARIZATION_ROOT}/models/segmentation-ggml/src
     ${DIARIZATION_ROOT}/models/embedding-ggml/src
+    ${DIARIZATION_ROOT}/whisper.cpp/examples
     ${DIARIZATION_ROOT}/whisper.cpp/ggml/include
     ${DIARIZATION_ROOT}/whisper.cpp/include
     ${DIARIZATION_ROOT}/whisper.cpp/src

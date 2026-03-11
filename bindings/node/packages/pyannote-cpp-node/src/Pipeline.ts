@@ -1,5 +1,5 @@
 import { accessSync } from 'node:fs';
-import { getBinding, type NativePipelineModel } from './binding.js';
+import { getBinding, getCapabilities, type NativePipelineModel } from './binding.js';
 import { PipelineSession } from './PipelineSession.js';
 import type { ModelConfig, TranscriptionResult, DecodeOptions } from './types.js';
 
@@ -11,6 +11,13 @@ export class Pipeline {
   }
 
   static async load(config: ModelConfig): Promise<Pipeline> {
+    const capabilities = getCapabilities();
+    if (!capabilities.pipeline) {
+      throw new Error(
+        'Pipeline is only supported on macOS Apple Silicon. Low-level whisper/VAD APIs remain available on this platform.',
+      );
+    }
+
     const requiredPaths = [
       config.segModelPath,
       config.segCoremlPath,

@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { Pipeline, type AlignedSegment } from '../src/index.js';
+import { hasRealPipelineAssets, pipelineSupported } from './real_assets.js';
+
+const describePipeline = describe.runIf(pipelineSupported && hasRealPipelineAssets());
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '../../../../..');
@@ -51,7 +54,7 @@ function loadWav(filePath: string): Float32Array {
   throw new Error('No data chunk found in WAV file');
 }
 
-describe('Model loading', () => {
+describePipeline('Model loading', () => {
   it('loads model with valid paths', async () => {
     const model = await Pipeline.load(config);
     expect(model).toBeDefined();
@@ -73,7 +76,7 @@ describe('Model loading', () => {
   });
 });
 
-describe('One-shot transcribe', () => {
+describePipeline('One-shot transcribe', () => {
   let model: Pipeline;
   const audio = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
 
@@ -123,7 +126,7 @@ describe('One-shot transcribe', () => {
   });
 });
 
-describe('Streaming session', () => {
+describePipeline('Streaming session', () => {
   it('push returns boolean[] VAD predictions', async () => {
     const model = await Pipeline.load(config);
     const session = model.createSession();
@@ -235,7 +238,7 @@ describe('Streaming session', () => {
   });
 });
 
-describe('Resource cleanup', () => {
+describePipeline('Resource cleanup', () => {
   it('close session then model without crash', async () => {
     const model = await Pipeline.load(config);
     const session = model.createSession();
@@ -268,7 +271,7 @@ describe('Resource cleanup', () => {
   });
 });
 
-describe('Shared model cache', () => {
+describePipeline('Shared model cache', () => {
   let model: Pipeline;
   const audio = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
 
@@ -309,7 +312,7 @@ describe('Shared model cache', () => {
   });
 });
 
-describe('Shared model cache', () => {
+describePipeline('Shared model cache', () => {
   let model: Pipeline;
   const audio = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
 
@@ -347,7 +350,7 @@ describe('Shared model cache', () => {
   });
 });
 
-describe('Whisper CoreML mode switching', () => {
+describePipeline('Whisper CoreML mode switching', () => {
   // Use turbo model which has a CoreML encoder (.mlmodelc) available
   const coremlConfig = {
     ...config,

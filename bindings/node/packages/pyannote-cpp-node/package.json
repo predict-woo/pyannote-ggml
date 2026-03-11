@@ -1,9 +1,16 @@
 {
   "name": "pyannote-cpp-node",
   "version": "0.6.0",
+  "description": "Node.js bindings for whisper.cpp plus the pyannote speaker diarization pipeline",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "engines": { "node": ">=18" },
   "files": [
     "dist/**/*.js",
@@ -20,7 +27,7 @@
   },
   "optionalDependencies": {
     "@pyannote-cpp-node/darwin-arm64": "0.6.0",
-    "@pyannote-cpp-node/darwin-x64": "0.6.0"
+    "@pyannote-cpp-node/win32-x64": "0.6.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

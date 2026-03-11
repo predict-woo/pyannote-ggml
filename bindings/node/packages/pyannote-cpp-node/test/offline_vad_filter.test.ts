@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { Pipeline } from '../src/index.js';
+import { hasRealPipelineAssets, pipelineSupported } from './real_assets.js';
+
+const describePipeline = describe.runIf(pipelineSupported && hasRealPipelineAssets());
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '../../../../..');
@@ -58,7 +61,7 @@ function loadWav(filePath: string): Float32Array {
 
 const SAMPLE_RATE = 16000;
 
-describe('Offline VAD filter — with VAD model', () => {
+describePipeline('Offline VAD filter — with VAD model', () => {
   let pipeline: Pipeline;
   const audio = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
 
@@ -120,7 +123,7 @@ describe('Offline VAD filter — with VAD model', () => {
   });
 });
 
-describe('Offline VAD filter — without VAD model', () => {
+describePipeline('Offline VAD filter — without VAD model', () => {
   let pipeline: Pipeline;
   const audio = loadWav(resolve(PROJECT_ROOT, 'samples/sample.wav'));
 
@@ -151,7 +154,7 @@ describe('Offline VAD filter — without VAD model', () => {
   });
 });
 
-describe('Offline VAD filter — silence compression', () => {
+describePipeline('Offline VAD filter — silence compression', () => {
   let pipeline: Pipeline;
 
   beforeAll(async () => {

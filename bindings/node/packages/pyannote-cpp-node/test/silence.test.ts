@@ -3,6 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { Pipeline, type AlignedSegment } from '../src/index.js';
+import { hasRealPipelineAssets, pipelineSupported } from './real_assets.js';
+
+const describePipeline = describe.runIf(pipelineSupported && hasRealPipelineAssets());
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '../../../../..');
@@ -23,7 +26,7 @@ const CHUNK_SIZE = 512;
 const SILENCE_DURATION_SEC = 30;
 const TOTAL_SAMPLES = SAMPLE_RATE * SILENCE_DURATION_SEC;
 
-describe('Silence handling with VAD', () => {
+describePipeline('Silence handling with VAD', () => {
   let pipeline: Pipeline;
 
   beforeAll(async () => {

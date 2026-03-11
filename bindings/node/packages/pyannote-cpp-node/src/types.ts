@@ -1,114 +1,206 @@
-export interface ModelConfig {
-  // === Required Model Paths ===
-  /** Path to segmentation GGUF model */
-  segModelPath: string;
-  /** Path to embedding GGUF model (required unless transcriptionOnly is true) */
-  embModelPath?: string;
-  /** Path to PLDA GGUF model (required unless transcriptionOnly is true) */
-  pldaPath?: string;
-  /** Path to embedding CoreML .mlpackage directory (required unless transcriptionOnly is true) */
-  coremlPath?: string;
-  /** Path to segmentation CoreML .mlpackage directory */
-  segCoremlPath: string;
-  /** Path to Whisper GGUF model */
-  whisperModelPath: string;
+export interface Capabilities {
+  whisper: boolean;
+  vad: boolean;
+  gpuDiscovery: boolean;
+  pipeline: boolean;
+  diarization: boolean;
+}
 
-  // === Optional Model Paths ===
-  /** Path to Silero VAD model (optional, enables silence compression) */
-  vadModelPath?: string;
-  /** Transcription-only mode - skip speaker diarization (default: false).
-   * When true, embModelPath, pldaPath, and coremlPath (embedding CoreML) are not required. */
-  transcriptionOnly?: boolean;
+export interface WhisperContextOptions {
+  model: string;
+  use_gpu?: boolean;
+  flash_attn?: boolean;
+  gpu_device?: number;
+  use_coreml?: boolean;
+  use_openvino?: boolean;
+  openvino_model_path?: string;
+  openvino_device?: string;
+  openvino_cache_dir?: string;
+  dtw?: string;
+  dtw_norm_top_k?: number;
+  no_prints?: boolean;
+}
 
-  // === Whisper Context Options (model loading) ===
-  /** Enable GPU acceleration (default: true) */
-  useGpu?: boolean;
-  /** Enable Flash Attention (default: true) */
-  flashAttn?: boolean;
-  /** GPU device index (default: 0) */
-  gpuDevice?: number;
-  /**
-   * Enable CoreML acceleration for Whisper encoder on macOS (default: false).
-   * The CoreML model must be placed next to the GGUF model with naming convention:
-   * e.g., ggml-base.en.bin -> ggml-base.en-encoder.mlmodelc/
-   */
-  useCoreml?: boolean;
-  /** Suppress whisper.cpp log output (default: false) */
-  noPrints?: boolean;
-
-  // === Whisper Decode Options ===
-  /** Number of threads for Whisper inference (default: 4) */
-  nThreads?: number;
-  /** Language code (e.g., 'en', 'zh'). Omit for auto-detect. (default: 'en') */
+export interface TranscribeOptionsBase {
   language?: string;
-  /** Translate non-English speech to English (default: false) */
   translate?: boolean;
-  /** Auto-detect spoken language. Overrides 'language' when true. (default: false) */
-  detectLanguage?: boolean;
-
-  // === Sampling ===
-  /** Sampling temperature. 0.0 = greedy deterministic. (default: 0.0) */
+  detect_language?: boolean;
+  n_threads?: number;
+  n_processors?: number;
+  offset_ms?: number;
+  duration_ms?: number;
+  audio_ctx?: number;
+  no_timestamps?: boolean;
+  single_segment?: boolean;
+  max_len?: number;
+  max_tokens?: number;
+  max_context?: number;
+  split_on_word?: boolean;
+  token_timestamps?: boolean;
+  word_thold?: number;
+  comma_in_time?: boolean;
   temperature?: number;
-  /** Temperature increment for fallback retries (default: 0.2) */
-  temperatureInc?: number;
-  /** Disable temperature fallback. If true, temperatureInc is ignored. (default: false) */
-  noFallback?: boolean;
-  /** Beam search size. -1 uses greedy decoding. >1 enables beam search. (default: -1) */
-  beamSize?: number;
-  /** Best-of-N sampling candidates for greedy decoding (default: 5) */
-  bestOf?: number;
-
-  // === Thresholds ===
-  /** Entropy threshold for decoder fallback (default: 2.4) */
-  entropyThold?: number;
-  /** Log probability threshold for decoder fallback (default: -1.0) */
-  logprobThold?: number;
-  /** No-speech probability threshold (default: 0.6) */
-  noSpeechThold?: number;
-
-  // === Context ===
-  /** Initial prompt text to condition the decoder (default: none) */
+  temperature_inc?: number;
+  best_of?: number;
+  beam_size?: number;
+  no_fallback?: boolean;
+  entropy_thold?: number;
+  logprob_thold?: number;
+  no_speech_thold?: number;
   prompt?: string;
-  /** Don't use previous segment as context for next segment (default: true) */
+  no_context?: boolean;
+  suppress_blank?: boolean;
+  suppress_nst?: boolean;
+  diarize?: boolean;
+  tinydiarize?: boolean;
+  print_special?: boolean;
+  print_progress?: boolean;
+  print_realtime?: boolean;
+  print_timestamps?: boolean;
+  vad?: boolean;
+  vad_model?: string;
+  vad_threshold?: number;
+  vad_min_speech_duration_ms?: number;
+  vad_min_silence_duration_ms?: number;
+  vad_max_speech_duration_s?: number;
+  vad_speech_pad_ms?: number;
+  vad_samples_overlap?: number;
+  progress_callback?: (progress: number) => void;
+  on_new_segment?: (segment: StreamingSegment) => void;
+}
+
+export interface TranscribeOptionsFile extends TranscribeOptionsBase {
+  fname_inp: string;
+  pcmf32?: never;
+}
+
+export interface TranscribeOptionsBuffer extends TranscribeOptionsBase {
+  pcmf32: Float32Array;
+  fname_inp?: never;
+}
+
+export type TranscribeOptions = TranscribeOptionsFile | TranscribeOptionsBuffer;
+
+export interface StreamingToken {
+  text: string;
+  probability: number;
+  t0: number;
+  t1: number;
+  t_dtw: number;
+}
+
+export interface TranscriptSegment {
+  start: string;
+  end: string;
+  text: string;
+  tokens?: StreamingToken[];
+}
+
+export interface StreamingSegment {
+  start: string;
+  end: string;
+  text: string;
+  segment_index: number;
+  is_partial: boolean;
+  tokens?: StreamingToken[];
+}
+
+export interface TranscribeResult {
+  segments: TranscriptSegment[];
+  language?: string;
+}
+
+export interface GpuDevice {
+  index: number;
+  name: string;
+  description: string;
+  type: 'gpu' | 'igpu';
+  memory_free: number;
+  memory_total: number;
+}
+
+export interface VadContextOptions {
+  model: string;
+  threshold?: number;
+  n_threads?: number;
+  no_prints?: boolean;
+}
+
+export interface WhisperContext {
+  getSystemInfo(): string;
+  isMultilingual(): boolean;
+  free(): void;
+}
+
+export interface WhisperContextConstructor {
+  new (options: WhisperContextOptions): WhisperContext;
+}
+
+export interface VadContext {
+  getWindowSamples(): number;
+  getSampleRate(): number;
+  process(samples: Float32Array): number;
+  reset(): void;
+  free(): void;
+}
+
+export interface VadContextConstructor {
+  new (options: VadContextOptions): VadContext;
+}
+
+export type TranscribeCallback = (
+  error: Error | null,
+  result?: TranscribeResult
+) => void;
+
+export interface ModelConfig {
+  segModelPath: string;
+  embModelPath?: string;
+  pldaPath?: string;
+  coremlPath?: string;
+  segCoremlPath: string;
+  whisperModelPath: string;
+  vadModelPath?: string;
+  transcriptionOnly?: boolean;
+  useGpu?: boolean;
+  flashAttn?: boolean;
+  gpuDevice?: number;
+  useCoreml?: boolean;
+  noPrints?: boolean;
+  nThreads?: number;
+  language?: string;
+  translate?: boolean;
+  detectLanguage?: boolean;
+  temperature?: number;
+  temperatureInc?: number;
+  noFallback?: boolean;
+  beamSize?: number;
+  bestOf?: number;
+  entropyThold?: number;
+  logprobThold?: number;
+  noSpeechThold?: number;
+  prompt?: string;
   noContext?: boolean;
-  /** Suppress blank outputs at the beginning of segments (default: true) */
   suppressBlank?: boolean;
-  /** Suppress non-speech tokens (default: false) */
   suppressNst?: boolean;
 }
 
 export interface DecodeOptions {
-  /** Language code (e.g., 'en', 'zh'). Omit for auto-detect. */
   language?: string;
-  /** Translate non-English speech to English */
   translate?: boolean;
-  /** Auto-detect spoken language. Overrides 'language' when true. */
   detectLanguage?: boolean;
-  /** Number of threads for Whisper inference */
   nThreads?: number;
-  /** Sampling temperature. 0.0 = greedy deterministic. */
   temperature?: number;
-  /** Temperature increment for fallback retries */
   temperatureInc?: number;
-  /** Disable temperature fallback. If true, temperatureInc is ignored. */
   noFallback?: boolean;
-  /** Beam search size. -1 uses greedy decoding. >1 enables beam search. */
   beamSize?: number;
-  /** Best-of-N sampling candidates for greedy decoding */
   bestOf?: number;
-  /** Entropy threshold for decoder fallback */
   entropyThold?: number;
-  /** Log probability threshold for decoder fallback */
   logprobThold?: number;
-  /** No-speech probability threshold */
   noSpeechThold?: number;
-  /** Initial prompt text to condition the decoder */
   prompt?: string;
-  /** Don't use previous segment as context for next segment */
   noContext?: boolean;
-  /** Suppress blank outputs at the beginning of segments */
   suppressBlank?: boolean;
-  /** Suppress non-speech tokens */
   suppressNst?: boolean;
 }
 
@@ -120,14 +212,6 @@ export interface AlignedSegment {
 }
 
 export interface TranscriptionResult {
-  /** Full speaker-labeled transcript segments. */
   segments: AlignedSegment[];
-  /**
-   * Silence-filtered audio (16 kHz mono Float32Array).
-   * Present when a VAD model is loaded (`vadModelPath` in config).
-   * Silence longer than 2 seconds is compressed to 2 seconds.
-   * All segment timestamps are aligned to this audio —
-   * save it directly and timestamps will sync correctly.
-   */
   filteredAudio?: Float32Array;
 }
