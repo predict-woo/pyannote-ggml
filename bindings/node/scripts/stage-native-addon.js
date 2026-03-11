@@ -28,6 +28,27 @@ function copyIfExists(source, destination) {
   return true;
 }
 
+function copyTreeContents(sourceDir, destinationDir) {
+  if (!fs.existsSync(sourceDir)) {
+    return;
+  }
+
+  ensureDir(destinationDir);
+
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const destinationPath = path.join(destinationDir, entry.name);
+
+    if (entry.isDirectory()) {
+      fs.rmSync(destinationPath, { recursive: true, force: true });
+      fs.cpSync(sourcePath, destinationPath, { recursive: true });
+      continue;
+    }
+
+    copyIfExists(sourcePath, destinationPath);
+  }
+}
+
 const args = parseArgs(process.argv.slice(2));
 const platformKey = args.get('--platform') || `${os.platform()}-${os.arch()}`;
 const packageDir = args.get('--package-dir') || path.join(bindingsRoot, 'packages', platformKey);
@@ -76,15 +97,14 @@ if (platformKey === 'win32-x64') {
 }
 
 if (copyNodeModules) {
-  const nodeModulesDest = path.join(
+  const nodeModulesBuildDir = path.join(
     bindingsRoot,
     'node_modules',
     packageName,
     'build',
     'Release',
-    'pyannote-addon.node',
   );
-  copyIfExists(addonDest, nodeModulesDest);
+  copyTreeContents(packageBuildDir, nodeModulesBuildDir);
 }
 
 console.log(`Staged ${platformKey} addon from ${sourceDir}`);
