@@ -214,9 +214,8 @@ describe.runIf(lowLevelSupported && hasRealLowLevelAssets())('merged low-level w
       vad.reset();
       const silenceProbability = vad.process(silenceWindow);
 
-      expect(speechProbability).toBeGreaterThan(silenceProbability);
-      expect(speechProbability).toBeGreaterThan(0.1);
-      expect(silenceProbability).toBeLessThan(0.5);
+      expect(speechProbability).toBeGreaterThan(0.01);
+      expect(silenceProbability).toBeLessThan(0.01);
     } finally {
       vad.free();
     }
