@@ -50,6 +50,7 @@ target_include_directories(whisper_static PUBLIC
     ${WHISPER_ROOT}/include
     ${WHISPER_ROOT}/src
 )
+target_compile_definitions(whisper_static PRIVATE WHISPER_VERSION="1.0.0")
 target_link_libraries(whisper_static PUBLIC ggml)
 
 if(WHISPER_OPENVINO_ENABLED)
